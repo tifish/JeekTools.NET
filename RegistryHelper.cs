@@ -16,6 +16,12 @@ public static class RegistryHelper
         return (int)(value ?? defaultValue);
     }
 
+    public static byte[]? GetBinaryValue(string keyName, string? valueName, byte[]? defaultValue)
+    {
+        var value = Registry.GetValue(keyName, valueName, null);
+        return (byte[]?)(value ?? defaultValue);
+    }
+
     public static void SetValue(string keyName, string? valueName, string value)
     {
         var currentValue = GetValue(keyName, valueName, null);
@@ -32,6 +38,11 @@ public static class RegistryHelper
             return;
 
         Registry.SetValue(keyName, valueName, value);
+    }
+
+    public static void SetBinaryValue(string keyName, string? valueName, byte[] value)
+    {
+        Registry.SetValue(keyName, valueName, value, RegistryValueKind.Binary);
     }
 
     public static void SetValue(string keyName, string? valueName, object value, RegistryValueKind valueKind)
