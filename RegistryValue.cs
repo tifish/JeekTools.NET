@@ -5,7 +5,7 @@ namespace JeekTools;
 public struct RegistryValue(string keyName, string? valueName)
 {
     public string KeyName { get; set; } = keyName;
-    public string? ValueName { get; set; } = valueName;
+    public string? ValueName { get; set; } = string.IsNullOrEmpty(valueName) ? null : valueName;
 
     public readonly string? GetValue(string? defaultValue)
     {
