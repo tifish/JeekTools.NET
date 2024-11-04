@@ -86,4 +86,10 @@ public struct RegistryValue(string keyName, string? valueName)
     {
         RegistryHelper.DeleteKey(KeyName);
     }
+
+    public bool HasKey()
+    {
+        using var key = RegistryHelper.OpenKey(KeyName);
+        return key != null;
+    }
 }
