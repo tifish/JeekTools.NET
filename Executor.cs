@@ -9,10 +9,13 @@ public static class Executor
 {
     private static readonly ILogger Log = LogManager.CreateLogger(nameof(Executor));
 
-    public static Process? Run(string fileName, string arguments = "", bool useShellExecute = true)
+    public static Process? Run(string fileName, string arguments = "", bool useShellExecute = true, bool createNoWindow = false)
     {
         var startInfo = new ProcessStartInfo(fileName, arguments)
-            { UseShellExecute = useShellExecute };
+        {
+            UseShellExecute = useShellExecute,
+            CreateNoWindow = createNoWindow,
+        };
         return Run(startInfo);
     }
 
