@@ -13,10 +13,21 @@ public class TabFile
         if (!File.Exists(tabPath))
             return false;
 
-        var lines = File.ReadAllLines(tabPath);
+        Rows.Clear();
+        foreach (var line in File.ReadAllLines(tabPath))
+            if (!string.IsNullOrEmpty(line))
+                Rows.Add(line.Split(Separator).ToList());
+
+        return true;
+    }
+
+    public async Task<bool> LoadAsync(string tabPath)
+    {
+        if (!File.Exists(tabPath))
+            return false;
 
         Rows.Clear();
-        foreach (var line in lines)
+        await foreach (var line in File.ReadLinesAsync(tabPath))
             if (!string.IsNullOrEmpty(line))
                 Rows.Add(line.Split(Separator).ToList());
 
@@ -28,5 +39,12 @@ public class TabFile
         using var writer = new StreamWriter(tabPath, false, new UTF8Encoding(true));
         foreach (var row in Rows)
             writer.WriteLine(string.Join(Separator, row));
+    }
+
+    public async Task SaveAsync(string tabPath)
+    {
+        await using var writer = new StreamWriter(tabPath, false, new UTF8Encoding(true));
+        foreach (var row in Rows)
+            await writer.WriteLineAsync(string.Join(Separator, row));
     }
 }
