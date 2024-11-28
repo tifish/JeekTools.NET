@@ -92,4 +92,10 @@ public struct RegistryValue(string keyName, string? valueName)
         using var key = RegistryHelper.OpenKey(KeyName);
         return key != null;
     }
+
+    public bool HasValue()
+    {
+        using var key = RegistryHelper.OpenKey(KeyName);
+        return key?.GetValue(ValueName) != null;
+    }
 }
