@@ -63,7 +63,14 @@ public static class LogManager
                     {
                         var fileTime = File.GetLastWriteTime(file);
                         if (now - fileTime > RetainFileLimit)
-                            File.Delete(file);
+                            try
+                            {
+                                File.Delete(file);
+                            }
+                            catch
+                            {
+                                // ignored
+                            }
                     }
                 }
 
