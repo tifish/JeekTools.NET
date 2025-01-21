@@ -30,13 +30,15 @@ public static class HttpClientExtensions
 
     public static async Task<bool> TestUrl(this HttpClient httpClient, string url, int timeoutMilliseconds = 3000)
     {
-        httpClient.Timeout = TimeSpan.FromMilliseconds(timeoutMilliseconds);
+        var timeout = TimeSpan.FromMilliseconds(timeoutMilliseconds);
+        if (httpClient.Timeout != timeout)
+            httpClient.Timeout = timeout;
 
-        var request = new HttpRequestMessage(HttpMethod.Head, url);
+        using var request = new HttpRequestMessage(HttpMethod.Head, url);
 
         try
         {
-            var response = await httpClient.SendAsync(request);
+            using var response = await httpClient.SendAsync(request);
             return response.IsSuccessStatusCode;
         }
         catch (Exception)
