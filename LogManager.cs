@@ -37,7 +37,10 @@ public static class LogManager
     public static TimeSpan RetainFileLimit { get; set; } = TimeSpan.FromDays(7);
     public static string LogsDirectory { get; set; } = "Logs";
     public static RollingInterval RollingInterval { get; set; } = RollingInterval.Day;
-    public static int RollingSizeKB { get; set; } = 1024;
+
+    // Big log file is easy to search and analyze.
+    // VSCode will disable highlight when file bigger than 1024 MB, so set it to 1000 MB.
+    public static int RollingSizeKB { get; set; } = 1000 * 1024;
 
     public static void EnableLogging()
     {
