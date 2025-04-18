@@ -87,7 +87,7 @@ public class PhysicalMonitorBrightnessController : IDisposable
 
     #endregion
 
-    private void UpdateMonitors()
+    public void UpdateMonitors()
     {
         DisposeMonitors(Monitors);
 
