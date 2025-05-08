@@ -57,6 +57,11 @@ public class GitRepository
         return await RunGitCommand("rebase");
     }
 
+    public async Task<bool> PullRebaseWithSubmodules()
+    {
+        return await RunGitCommand("pull --rebase --recurse-submodules");
+    }
+
     public async Task<bool> StashSave()
     {
         return await RunGitCommand("stash save");
