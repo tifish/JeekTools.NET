@@ -1,6 +1,4 @@
-﻿using System.Management;
-
-namespace JeekTools;
+﻿namespace JeekTools;
 
 public static class Ssd
 {
