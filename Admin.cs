@@ -23,27 +23,15 @@ public static class Admin
         });
     }
 
-    public static async Task<string> StartElevatedAndWait(string fileName, string arguments = "")
+    public static async Task<bool> StartElevatedAndWait(string fileName, string arguments = "")
     {
-        var process = Process.Start(new ProcessStartInfo
-        {
-            FileName = fileName,
-            Arguments = arguments,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            Verb = "runas",
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-        });
+        var process = StartElevated(fileName, arguments);
 
         if (process == null)
-            return "";
+            return false;
 
         await process.WaitForExitAsync();
 
-        if (process.ExitCode == 0)
-            return "";
-
-        return process.StandardError.ReadToEnd();
+        return process.ExitCode == 0;
     }
 }
