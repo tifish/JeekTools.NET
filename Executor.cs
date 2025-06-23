@@ -63,7 +63,7 @@ public static class Executor
     {
         try
         {
-            Process.Start(new ProcessStartInfo(fileOrUrl) { UseShellExecute = true });
+            Process.Start("explorer.exe", $"\"{fileOrUrl}\"");
         }
         catch (Exception ex)
         {
@@ -114,7 +114,7 @@ public static class Executor
     }
 
     [DllImport("shell32.dll", SetLastError = true)]
-    private static extern int SHOpenFolderAndSelectItems(IntPtr pidlFolder, uint cidl, [In] [MarshalAs(UnmanagedType.LPArray)] IntPtr[] apidl, uint dwFlags);
+    private static extern int SHOpenFolderAndSelectItems(IntPtr pidlFolder, uint cidl, [In][MarshalAs(UnmanagedType.LPArray)] IntPtr[] apidl, uint dwFlags);
 
     [DllImport("shell32.dll", SetLastError = true)]
     private static extern void SHParseDisplayName([MarshalAs(UnmanagedType.LPWStr)] string name, IntPtr bindingContext, [Out] out IntPtr pidl, uint sfgaoIn, [Out] out uint psfgaoOut);
