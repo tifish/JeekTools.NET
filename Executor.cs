@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Extensions.Logging;
 using ZLogger;
 
@@ -57,6 +58,20 @@ public static class Executor
         await process.WaitForExitAsync();
 
         return process.ExitCode == 0;
+    }
+
+    public static async Task<string> RunWithOutput(string fileName, string arguments, Encoding? encoding = null)
+    {
+        var process = Process.Start(new ProcessStartInfo(fileName, arguments)
+        {
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardOutputEncoding = encoding ?? Encoding.Default,
+        });
+        if (process is null)
+            return "";
+        return await process.StandardOutput.ReadToEndAsync();
     }
 
     public static void Open(string fileOrUrl)
