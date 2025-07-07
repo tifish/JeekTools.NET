@@ -34,4 +34,14 @@ public class JsonFile<T> where T : class
         await using var fileStream = File.Create(FilePath);
         await JsonSerializer.SerializeAsync(fileStream, obj, JsonSerializerOptions);
     }
+
+    public static T? FromJson(string json)
+    {
+        return JsonSerializer.Deserialize<T>(json, JsonSerializerOptions);
+    }
+
+    public static string ToJson(T obj)
+    {
+        return JsonSerializer.Serialize(obj, JsonSerializerOptions);
+    }
 }
