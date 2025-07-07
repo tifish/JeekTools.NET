@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Text;
 
 namespace JeekTools;
 
@@ -11,10 +12,14 @@ public static class Nssm
         return Process.Start(new ProcessStartInfo(NssmPath, command)
         {
             RedirectStandardOutput = true,
+            RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
         });
     }
+
+    public static string LastOutput { get; private set; } = "";
+    public static string LastError { get; private set; } = "";
 
     private static async Task<bool> CallNssmAndWait(string command)
     {
@@ -22,6 +27,8 @@ public static class Nssm
         if (process is null)
             return false;
         await process.WaitForExitAsync();
+        LastOutput = await process.StandardOutput.ReadToEndAsync();
+        LastError = await process.StandardError.ReadToEndAsync();
         return process.ExitCode == 0;
     }
 
