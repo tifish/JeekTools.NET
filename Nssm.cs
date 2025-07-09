@@ -63,7 +63,7 @@ public static class Nssm
         return statusString switch
         {
             "" => ServiceStatus.None,
-            "SERVICE_STOPPED" or "SERVICE_PAUSED" or "SERVICE_STOP_PENDING" => ServiceStatus.Stopped,
+            "SERVICE_STOPPED" or "SERVICE_STOP_PENDING" => ServiceStatus.Stopped,
             _ => ServiceStatus.Running,
         };
     }
