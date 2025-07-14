@@ -62,9 +62,14 @@ public static class Nssm
         var statusString = (await Executor.RunWithOutput(NssmPath, $"""status "{serviceName}" """)).Trim();
         return statusString switch
         {
-            "" => ServiceStatus.None,
-            "SERVICE_STOPPED" or "SERVICE_STOP_PENDING" => ServiceStatus.Stopped,
-            _ => ServiceStatus.Running,
+            "SERVICE_STOPPED" => ServiceStatus.Stopped,
+            "SERVICE_START_PENDING" => ServiceStatus.StartPending,
+            "SERVICE_STOP_PENDING" => ServiceStatus.StopPending,
+            "SERVICE_RUNNING" => ServiceStatus.Running,
+            "SERVICE_CONTINUE_PENDING" => ServiceStatus.ContinuePending,
+            "SERVICE_PAUSE_PENDING" => ServiceStatus.PausePending,
+            "SERVICE_PAUSED" => ServiceStatus.Paused,
+            _ => ServiceStatus.None,
         };
     }
 
@@ -72,8 +77,13 @@ public static class Nssm
 
 public enum ServiceStatus
 {
-    None,
-    Stopped,
-    Running,
+    None = 0,
+    Stopped = 1,
+    StartPending = 2,
+    StopPending = 3,
+    Running = 4,
+    ContinuePending = 5,
+    PausePending = 6,
+    Paused = 7,
 }
 
