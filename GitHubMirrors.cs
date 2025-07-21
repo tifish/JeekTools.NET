@@ -17,7 +17,7 @@ public static class GitHubMirrors
         if (_fastestMirrorIndex == -1)
         {
             if (TestUrl == "")
-                return "";
+                TestUrl = url;
 
             if (!await TestMirrorSpeed())
                 return "";
