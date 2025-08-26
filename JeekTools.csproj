@@ -1,16 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-    <PropertyGroup>
-        <TargetFramework>net8.0-windows</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-        <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-        <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    </PropertyGroup>
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
 
-    <ItemGroup>
-      <PackageReference Include="ZLogger" Version="2.5.10" />
-      <PackageReference Include="System.Management" Version="9.0.6" />
-    </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="ZLogger" Version="2.5.10" />
+  </ItemGroup>
 
 </Project>

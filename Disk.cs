@@ -1,132 +1,126 @@
-﻿using System.Management;
-using Microsoft.Extensions.Logging;
-using ZLogger;
+﻿using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace JeekTools;
 
 public static class Disk
 {
-    private static readonly ILogger Log = LogManager.CreateLogger(nameof(Disk));
-
-    private static readonly Dictionary<char, MediaType> _diskTypeCache = [];
-
-    public static MediaType GetType(char driveLetter)
+    [StructLayout(LayoutKind.Sequential)]
+    private struct VOLUME_DISK_EXTENTS
     {
-        driveLetter = char.ToUpper(driveLetter);
-
-        if (_diskTypeCache.TryGetValue(driveLetter, out var cachedDiskType))
-            return cachedDiskType;
-
-        var diskType = GetDiskTypeUsingWmi(driveLetter);
-
-        _diskTypeCache[driveLetter] = diskType;
-
-        return diskType;
+        public int NumberOfExtents;
+        public DISK_EXTENT Extents; // Only take the first Extent here
     }
 
-    private static MediaType GetDiskTypeUsingWmi(char driveLetter)
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DISK_EXTENT
     {
-        var driveId = driveLetter.ToString().ToUpper() + ":";
-
-        try
-        {
-            var physicalDeviceId = GetPhysicalDeviceIdFromDriveLetter(driveId);
-            if (physicalDeviceId == null)
-            {
-                Log.ZLogError($"IsSsdUsingWmi: physical device id not found: {driveLetter}");
-                return MediaType.Unknown;
-            }
-            var mediaType = GetMediaTypeFromPhysicalDeviceId(physicalDeviceId);
-
-            return mediaType;
-        }
-        catch (Exception ex)
-        {
-            Log.ZLogError(ex, $"IsSsdUsingWmi exception: {driveLetter}");
-            return MediaType.Unknown;
-        }
+        public int DiskNumber;
+        public long StartingOffset;
+        public long ExtentLength;
     }
 
-    private static string? GetPhysicalDeviceIdFromDriveLetter(string logicalDrive)
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DEVICE_SEEK_PENALTY_DESCRIPTOR
     {
-        using var searcher1 = new ManagementObjectSearcher("SELECT * FROM Win32_LogicalDiskToPartition");
-        foreach (ManagementObject rel in searcher1.Get())
-        {
-            var antecedent = rel["Antecedent"]?.ToString();
-            var dependent = rel["Dependent"]?.ToString();
-
-            if (antecedent == null || dependent == null)
-                continue;
-
-            if (!dependent.Contains($"Win32_LogicalDisk.DeviceID=\"{logicalDrive}\""))
-                continue;
-
-            var partitionMatch = antecedent.Split(["DeviceID=\""], StringSplitOptions.None);
-            if (partitionMatch.Length <= 1)
-                continue;
-
-            var partitionId = partitionMatch[1].TrimEnd('"');
-
-            // Step 2: Find which physical disk the partition maps to
-            using var searcher2 = new ManagementObjectSearcher("SELECT * FROM Win32_DiskDriveToDiskPartition");
-            foreach (ManagementObject map in searcher2.Get())
-            {
-                var diskAntecedent = map["Antecedent"]?.ToString();
-                var diskDependent = map["Dependent"]?.ToString();
-
-                if (diskAntecedent == null || diskDependent == null)
-                    continue;
-
-                if (!diskDependent.Contains($"DeviceID=\"{partitionId}\""))
-                    continue;
-
-                var diskMatch = diskAntecedent.Split(["DeviceID=\""], StringSplitOptions.None);
-                if (diskMatch.Length > 1)
-                {
-                    return diskMatch[1].TrimEnd('"');
-                }
-            }
-        }
-
-        Log.ZLogError($"GetPhysicalDeviceIdFromDriveLetter: physical device id not found: {logicalDrive}");
-        return null;
+        public uint Version;
+        public uint Size;
+        [MarshalAs(UnmanagedType.U1)]
+        public bool IncursSeekPenalty;
     }
 
-    public enum MediaType
+    [StructLayout(LayoutKind.Sequential)]
+    private struct STORAGE_PROPERTY_QUERY
     {
-        Unknown = 0,
-        HDD = 3,
-        SSD = 4,
-        SCM = 5
+        public int PropertyId;
+        public int QueryType;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 1)]
+        public byte[] AdditionalParameters;
     }
 
-    private static MediaType GetMediaTypeFromPhysicalDeviceId(string physicalDeviceId)
+    private const uint IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS = 0x00560000;
+    private const uint IOCTL_STORAGE_QUERY_PROPERTY = 0x2D1400;
+    private const int StorageDeviceSeekPenaltyProperty = 7;
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern SafeFileHandle CreateFile(
+        string lpFileName, uint dwDesiredAccess, uint dwShareMode,
+        IntPtr lpSecurityAttributes, uint dwCreationDisposition,
+        uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool DeviceIoControl(
+        SafeFileHandle hDevice, uint dwIoControlCode,
+        IntPtr lpInBuffer, int nInBufferSize,
+        out VOLUME_DISK_EXTENTS lpOutBuffer, int nOutBufferSize,
+        out int lpBytesReturned, IntPtr lpOverlapped);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool DeviceIoControl(
+        SafeFileHandle hDevice, uint dwIoControlCode,
+        ref STORAGE_PROPERTY_QUERY lpInBuffer, int nInBufferSize,
+        ref DEVICE_SEEK_PENALTY_DESCRIPTOR lpOutBuffer, int nOutBufferSize,
+        out uint lpBytesReturned, IntPtr lpOverlapped);
+
+    /// <summary>
+    /// Detect whether the specified logical drive is an SSD
+    /// </summary>
+    /// <param name="driveLetter">Drive letter, such as "C:\" or "D:\"</param>
+    /// <returns>Returns true if it's an SSD, otherwise false</returns>
+    public static bool IsSSD(string driveLetter)
     {
-        // physicalDeviceId example: \\.\PHYSICALDRIVE0
-        var diskNumberStr = new string([.. physicalDeviceId.Where(char.IsDigit)]);
-        if (!int.TryParse(diskNumberStr, out int diskNumber))
-            return MediaType.Unknown;
+        if (driveLetter.Length == 0)
+            throw new ArgumentException("Drive letter cannot be empty");
 
-        var scope = new ManagementScope(@"\\.\ROOT\Microsoft\Windows\Storage");
-        scope.Connect();
+        int diskNumber = GetDiskNumber(driveLetter[0]);
+        return CheckDiskSSD(diskNumber);
+    }
 
-        var searcher = new ManagementObjectSearcher(scope, new ObjectQuery("SELECT * FROM MSFT_PhysicalDisk"));
+    // Get the physical disk number corresponding to the logical drive
+    private static int GetDiskNumber(char driveLetter)
+    {
+        string path = $"\\\\.\\{driveLetter}:";
+        using var handle = CreateFile(path, 0, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
 
-        foreach (ManagementObject disk in searcher.Get())
+        if (handle.IsInvalid)
+            throw new InvalidOperationException($"Cannot open logical drive {driveLetter}");
+
+        if (!DeviceIoControl(handle, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+            IntPtr.Zero, 0,
+            out var extents, Marshal.SizeOf(typeof(VOLUME_DISK_EXTENTS)),
+            out _, IntPtr.Zero))
         {
-            if (disk["DeviceId"] != null && Convert.ToInt32(disk["DeviceId"]) == diskNumber)
-            {
-                int mediaTypeCode = disk["MediaType"] != null ? Convert.ToInt32(disk["MediaType"]) : 0;
-                return mediaTypeCode switch
-                {
-                    3 => MediaType.HDD,
-                    4 => MediaType.SSD,
-                    5 => MediaType.SCM,
-                    _ => MediaType.Unknown
-                };
-            }
+            throw new InvalidOperationException("Cannot get physical disk number");
         }
 
-        return MediaType.Unknown;
+        return extents.Extents.DiskNumber;
+    }
+
+    // Check if physical disk is SSD
+    private static bool CheckDiskSSD(int diskNumber)
+    {
+        string path = $"\\\\.\\PhysicalDrive{diskNumber}";
+        using var handle = CreateFile(path, 0, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
+
+        if (handle.IsInvalid)
+            throw new InvalidOperationException($"Cannot open physical disk {diskNumber}");
+
+        var query = new STORAGE_PROPERTY_QUERY
+        {
+            PropertyId = StorageDeviceSeekPenaltyProperty,
+            QueryType = 0,
+            AdditionalParameters = new byte[1]
+        };
+        var desc = new DEVICE_SEEK_PENALTY_DESCRIPTOR();
+
+        if (!DeviceIoControl(handle, IOCTL_STORAGE_QUERY_PROPERTY,
+            ref query, Marshal.SizeOf(typeof(STORAGE_PROPERTY_QUERY)),
+            ref desc, Marshal.SizeOf(typeof(DEVICE_SEEK_PENALTY_DESCRIPTOR)),
+            out _, IntPtr.Zero))
+        {
+            throw new InvalidOperationException("Cannot detect disk properties");
+        }
+
+        return !desc.IncursSeekPenalty; // No seek penalty → SSD
     }
 }

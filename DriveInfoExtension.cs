@@ -2,8 +2,8 @@
 
 public static class DriveInfoExtension
 {
-    public static Disk.MediaType GetDiskType(this DriveInfo driveInfo)
+    public static bool IsSSD(this DriveInfo driveInfo)
     {
-        return Disk.GetType(driveInfo.Name[0]);
+        return Disk.IsSSD(driveInfo.Name);
     }
 }
