@@ -67,13 +67,20 @@ public static class Disk
     /// </summary>
     /// <param name="driveLetter">Drive letter, such as "C:\" or "D:\"</param>
     /// <returns>Returns true if it's an SSD, otherwise false</returns>
-    public static bool IsSSD(string driveLetter)
+    public static bool IsSSD(string driveLetter, bool defaultWhenError)
     {
         if (driveLetter.Length == 0)
             throw new ArgumentException("Drive letter cannot be empty");
 
-        int diskNumber = GetDiskNumber(driveLetter[0]);
-        return CheckDiskSSD(diskNumber);
+        try
+        {
+            int diskNumber = GetDiskNumber(driveLetter[0]);
+            return CheckDiskSSD(diskNumber);
+        }
+        catch
+        {
+            return defaultWhenError;
+        }
     }
 
     // Get the physical disk number corresponding to the logical drive
