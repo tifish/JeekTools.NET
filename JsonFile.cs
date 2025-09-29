@@ -4,7 +4,8 @@ using System.Text.Unicode;
 
 namespace JeekTools;
 
-public class JsonFile<T> where T : class
+public class JsonFile<T>
+    where T : class
 {
     public string FilePath { get; set; }
 

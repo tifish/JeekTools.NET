@@ -14,13 +14,15 @@ public static class Admin
 
     public static Process? StartElevated(string fileName, string arguments = "")
     {
-        return Process.Start(new ProcessStartInfo
-        {
-            FileName = fileName,
-            Arguments = arguments,
-            UseShellExecute = true,
-            Verb = "runas",
-        });
+        return Process.Start(
+            new ProcessStartInfo
+            {
+                FileName = fileName,
+                Arguments = arguments,
+                UseShellExecute = true,
+                Verb = "runas",
+            }
+        );
     }
 
     public static async Task<bool> StartElevatedAndWait(string fileName, string arguments = "")

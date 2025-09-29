@@ -10,7 +10,12 @@ public static class Executor
 {
     private static readonly ILogger Log = LogManager.CreateLogger(nameof(Executor));
 
-    public static Process? Run(string fileName, string arguments = "", bool useShellExecute = true, bool createNoWindow = false)
+    public static Process? Run(
+        string fileName,
+        string arguments = "",
+        bool useShellExecute = true,
+        bool createNoWindow = false
+    )
     {
         var startInfo = new ProcessStartInfo(fileName, arguments)
         {
@@ -26,27 +31,41 @@ public static class Executor
     {
         try
         {
-            if (string.IsNullOrEmpty(processStartInfo.WorkingDirectory) && File.Exists(processStartInfo.FileName))
-                processStartInfo.WorkingDirectory = Path.GetDirectoryName(processStartInfo.FileName);
+            if (
+                string.IsNullOrEmpty(processStartInfo.WorkingDirectory)
+                && File.Exists(processStartInfo.FileName)
+            )
+                processStartInfo.WorkingDirectory = Path.GetDirectoryName(
+                    processStartInfo.FileName
+                );
             return Process.Start(processStartInfo);
         }
         catch (Exception ex)
         {
-            Log.ZLogError(ex, $"Failed to start external program：{processStartInfo.FileName} {processStartInfo.Arguments}");
+            Log.ZLogError(
+                ex,
+                $"Failed to start external program：{processStartInfo.FileName} {processStartInfo.Arguments}"
+            );
             OnRunException?.Invoke(processStartInfo, new UnhandledExceptionEventArgs(ex, false));
         }
 
         return null;
     }
 
-    public static async Task<bool> RunAndWait(string fileName, string arguments = "",
-        bool useShellExecute = true, bool createNoWindow = false)
+    public static async Task<bool> RunAndWait(
+        string fileName,
+        string arguments = "",
+        bool useShellExecute = true,
+        bool createNoWindow = false
+    )
     {
-        return await RunAndWait(new ProcessStartInfo(fileName, arguments ?? "")
-        {
-            UseShellExecute = useShellExecute,
-            CreateNoWindow = createNoWindow,
-        });
+        return await RunAndWait(
+            new ProcessStartInfo(fileName, arguments ?? "")
+            {
+                UseShellExecute = useShellExecute,
+                CreateNoWindow = createNoWindow,
+            }
+        );
     }
 
     public static async Task<bool> RunAndWait(ProcessStartInfo processStartInfo)
@@ -60,15 +79,21 @@ public static class Executor
         return process.ExitCode == 0;
     }
 
-    public static async Task<string> RunWithOutput(string fileName, string arguments, Encoding? encoding = null)
+    public static async Task<string> RunWithOutput(
+        string fileName,
+        string arguments,
+        Encoding? encoding = null
+    )
     {
-        var process = Process.Start(new ProcessStartInfo(fileName, arguments)
-        {
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            StandardOutputEncoding = encoding ?? Encoding.Default,
-        });
+        var process = Process.Start(
+            new ProcessStartInfo(fileName, arguments)
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                StandardOutputEncoding = encoding ?? Encoding.Default,
+            }
+        );
         if (process is null)
             return "";
         return await process.StandardOutput.ReadToEndAsync();
@@ -120,7 +145,8 @@ public static class Executor
         {
             cszFile = filePath,
             cszClass = "",
-            oaifInFlags = tagOPEN_AS_INFO_FLAGS.OAIF_ALLOW_REGISTRATION | tagOPEN_AS_INFO_FLAGS.OAIF_EXEC,
+            oaifInFlags =
+                tagOPEN_AS_INFO_FLAGS.OAIF_ALLOW_REGISTRATION | tagOPEN_AS_INFO_FLAGS.OAIF_EXEC,
         };
         var result = SHOpenWithDialog(IntPtr.Zero, ref openAsInfo) == 0;
         if (!result)
@@ -129,10 +155,21 @@ public static class Executor
     }
 
     [DllImport("shell32.dll", SetLastError = true)]
-    private static extern int SHOpenFolderAndSelectItems(IntPtr pidlFolder, uint cidl, [In][MarshalAs(UnmanagedType.LPArray)] IntPtr[] apidl, uint dwFlags);
+    private static extern int SHOpenFolderAndSelectItems(
+        IntPtr pidlFolder,
+        uint cidl,
+        [In] [MarshalAs(UnmanagedType.LPArray)] IntPtr[] apidl,
+        uint dwFlags
+    );
 
     [DllImport("shell32.dll", SetLastError = true)]
-    private static extern void SHParseDisplayName([MarshalAs(UnmanagedType.LPWStr)] string name, IntPtr bindingContext, [Out] out IntPtr pidl, uint sfgaoIn, [Out] out uint psfgaoOut);
+    private static extern void SHParseDisplayName(
+        [MarshalAs(UnmanagedType.LPWStr)] string name,
+        IntPtr bindingContext,
+        [Out] out IntPtr pidl,
+        uint sfgaoIn,
+        [Out] out uint psfgaoOut
+    );
 
     public static void OpenExplorerAndSelectItem(string path)
     {
@@ -151,7 +188,13 @@ public static class Executor
             // Log error, can't find folder
             return;
 
-        SHParseDisplayName(Path.Combine(folderPath, file), IntPtr.Zero, out var nativeFile, 0, out _);
+        SHParseDisplayName(
+            Path.Combine(folderPath, file),
+            IntPtr.Zero,
+            out var nativeFile,
+            0,
+            out _
+        );
 
         IntPtr[] fileArray;
         if (nativeFile == IntPtr.Zero)

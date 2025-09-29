@@ -74,7 +74,9 @@ public static class Svn
     }
 
     private static async Task<(bool, string)> RunWithProcessOutput(
-        string arguments, string workingDirectory)
+        string arguments,
+        string workingDirectory
+    )
     {
         var startInfo = new ProcessStartInfo
         {
@@ -90,7 +92,9 @@ public static class Svn
         using var proc = Process.Start(startInfo);
         if (proc == null)
         {
-            Log.ZLogError($"process is null: {startInfo.FileName} {startInfo.Arguments} in {startInfo.WorkingDirectory}");
+            Log.ZLogError(
+                $"process is null: {startInfo.FileName} {startInfo.Arguments} in {startInfo.WorkingDirectory}"
+            );
             return (false, "");
         }
 
@@ -101,13 +105,17 @@ public static class Svn
         if (!proc.WaitForExit(2000))
         {
             proc.Kill();
-            Log.ZLogError($"process timeout: {startInfo.FileName} status {startInfo.Arguments} in {startInfo.WorkingDirectory}");
+            Log.ZLogError(
+                $"process timeout: {startInfo.FileName} status {startInfo.Arguments} in {startInfo.WorkingDirectory}"
+            );
             return (false, output);
         }
 
         if (proc.ExitCode > 0)
         {
-            Log.ZLogError($"process exit code {proc.ExitCode}: {startInfo.FileName} status {startInfo.Arguments} in {startInfo.WorkingDirectory}");
+            Log.ZLogError(
+                $"process exit code {proc.ExitCode}: {startInfo.FileName} status {startInfo.Arguments} in {startInfo.WorkingDirectory}"
+            );
             return (false, output);
         }
 
@@ -115,7 +123,10 @@ public static class Svn
     }
 
     private static async Task<bool> RunWithProcessOutput(
-        string arguments, string workingDirectory, Func<string, bool> outputLineProcessor)
+        string arguments,
+        string workingDirectory,
+        Func<string, bool> outputLineProcessor
+    )
     {
         var startInfo = new ProcessStartInfo
         {
@@ -131,7 +142,9 @@ public static class Svn
         using var proc = Process.Start(startInfo);
         if (proc == null)
         {
-            Log.ZLogError($"process is null: {startInfo.FileName} {startInfo.Arguments} in {startInfo.WorkingDirectory}");
+            Log.ZLogError(
+                $"process is null: {startInfo.FileName} {startInfo.Arguments} in {startInfo.WorkingDirectory}"
+            );
             return false;
         }
 
@@ -149,13 +162,17 @@ public static class Svn
         if (!proc.WaitForExit(2000))
         {
             proc.Kill();
-            Log.ZLogError($"process timeout: {startInfo.FileName} status {startInfo.Arguments} in {startInfo.WorkingDirectory}");
+            Log.ZLogError(
+                $"process timeout: {startInfo.FileName} status {startInfo.Arguments} in {startInfo.WorkingDirectory}"
+            );
             return false;
         }
 
         if (proc.ExitCode > 0)
         {
-            Log.ZLogError($"process exit code {proc.ExitCode}: {startInfo.FileName} status {startInfo.Arguments} in {startInfo.WorkingDirectory}");
+            Log.ZLogError(
+                $"process exit code {proc.ExitCode}: {startInfo.FileName} status {startInfo.Arguments} in {startInfo.WorkingDirectory}"
+            );
             return false;
         }
 
@@ -167,113 +184,197 @@ public static class Svn
         return AsyncHelper.RunSync(() => Revert(path, arguments, workingDirectory));
     }
 
-    public static bool RevertSync(string[] paths, string arguments = "", string workingDirectory = "")
+    public static bool RevertSync(
+        string[] paths,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return AsyncHelper.RunSync(() => Revert(paths, arguments, workingDirectory));
     }
 
-    public static async Task<bool> Revert(string path, string arguments = "", string workingDirectory = "")
+    public static async Task<bool> Revert(
+        string path,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return await Revert(new[] { path }, arguments, workingDirectory);
     }
 
-    public static async Task<bool> Revert(string[] paths, string arguments = "", string workingDirectory = "")
+    public static async Task<bool> Revert(
+        string[] paths,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         if (paths.Length == 0)
             return false;
 
         using var fileListArg = new FileListArgument(paths, false);
-        return await Run(new ProcessStartInfo
-        {
-            FileName = ExePath,
-            Arguments = $"revert -R {fileListArg} {arguments}",
-            WorkingDirectory = workingDirectory,
-        });
+        return await Run(
+            new ProcessStartInfo
+            {
+                FileName = ExePath,
+                Arguments = $"revert -R {fileListArg} {arguments}",
+                WorkingDirectory = workingDirectory,
+            }
+        );
     }
 
-    public static bool RevertInfinitySync(string path, string arguments = "", string workingDirectory = "")
+    public static bool RevertInfinitySync(
+        string path,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return AsyncHelper.RunSync(() => RevertInfinity(path, arguments, workingDirectory));
     }
 
-    public static bool RevertInfinitySync(string[] paths, string arguments = "", string workingDirectory = "")
+    public static bool RevertInfinitySync(
+        string[] paths,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return AsyncHelper.RunSync(() => RevertInfinity(paths, arguments, workingDirectory));
     }
 
-    public static async Task<bool> RevertInfinity(string path, string arguments = "", string workingDirectory = "")
+    public static async Task<bool> RevertInfinity(
+        string path,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return await RevertInfinity(new[] { path }, arguments, workingDirectory);
     }
 
-    public static async Task<bool> RevertInfinity(string[] paths, string arguments = "", string workingDirectory = "")
+    public static async Task<bool> RevertInfinity(
+        string[] paths,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return await Revert(paths, arguments + " --depth infinity", workingDirectory);
     }
 
-    public static bool RemoveUnversionedSync(string path, string arguments = "", string workingDirectory = "")
+    public static bool RemoveUnversionedSync(
+        string path,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return AsyncHelper.RunSync(() => RemoveUnversioned(path, arguments, workingDirectory));
     }
 
-    public static bool RemoveUnversionedSync(string[] paths, string arguments = "", string workingDirectory = "")
+    public static bool RemoveUnversionedSync(
+        string[] paths,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return AsyncHelper.RunSync(() => RemoveUnversioned(paths, arguments, workingDirectory));
     }
 
-    public static async Task<bool> RemoveUnversioned(string path, string arguments = "", string workingDirectory = "")
+    public static async Task<bool> RemoveUnversioned(
+        string path,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return await RemoveUnversioned(new[] { path }, arguments, workingDirectory);
     }
 
-    public static async Task<bool> RemoveUnversioned(string[] paths, string arguments = "", string workingDirectory = "")
+    public static async Task<bool> RemoveUnversioned(
+        string[] paths,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return await CleanUp(paths, arguments + " --remove-unversioned", workingDirectory);
     }
 
-    public static bool RevertAndRemoveUnversionedSync(string path, string arguments = "", string workingDirectory = "")
+    public static bool RevertAndRemoveUnversionedSync(
+        string path,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
-        return AsyncHelper.RunSync(() => RevertAndRemoveUnversioned(path, arguments, workingDirectory));
+        return AsyncHelper.RunSync(() =>
+            RevertAndRemoveUnversioned(path, arguments, workingDirectory)
+        );
     }
 
-    public static bool RevertAndRemoveUnversionedSync(string[] paths, string arguments = "", string workingDirectory = "")
+    public static bool RevertAndRemoveUnversionedSync(
+        string[] paths,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
-        return AsyncHelper.RunSync(() => RevertAndRemoveUnversioned(paths, arguments, workingDirectory));
+        return AsyncHelper.RunSync(() =>
+            RevertAndRemoveUnversioned(paths, arguments, workingDirectory)
+        );
     }
 
-    public static async Task<bool> RevertAndRemoveUnversioned(string path, string arguments = "", string workingDirectory = "")
+    public static async Task<bool> RevertAndRemoveUnversioned(
+        string path,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return await RevertAndRemoveUnversioned(new[] { path }, arguments, workingDirectory);
     }
 
-    public static async Task<bool> RevertAndRemoveUnversioned(string[] paths, string arguments = "", string workingDirectory = "")
+    public static async Task<bool> RevertAndRemoveUnversioned(
+        string[] paths,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return await Revert(paths, arguments, workingDirectory)
-               && await RemoveUnversioned(paths, arguments, workingDirectory);
+            && await RemoveUnversioned(paths, arguments, workingDirectory);
     }
 
-    public static Dictionary<string, string>? GetFilesStatusSync(string path, string arguments = "", string workingDirectory = "")
+    public static Dictionary<string, string>? GetFilesStatusSync(
+        string path,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return AsyncHelper.RunSync(() => GetFilesStatus(path, arguments, workingDirectory));
     }
 
-    public static Dictionary<string, string>? GetFilesStatusSync(string[] paths, string arguments = "", string workingDirectory = "")
+    public static Dictionary<string, string>? GetFilesStatusSync(
+        string[] paths,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return AsyncHelper.RunSync(() => GetFilesStatus(paths, arguments, workingDirectory));
     }
 
-    public static async Task<Dictionary<string, string>?> GetFilesStatus(string path, string arguments = "", string workingDirectory = "")
+    public static async Task<Dictionary<string, string>?> GetFilesStatus(
+        string path,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return await GetFilesStatus(new[] { path }, arguments, workingDirectory);
     }
 
-    public static async Task<Dictionary<string, string>?> GetFilesStatus(string[] paths, string arguments = "", string workingDirectory = "")
+    public static async Task<Dictionary<string, string>?> GetFilesStatus(
+        string[] paths,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         using var fileListArg = new FileListArgument(paths, true);
         var fileStatusDict = new Dictionary<string, string>();
 
         var runResult = await RunWithProcessOutput(
-            $"status {fileListArg} {arguments}", workingDirectory, line =>
+            $"status {fileListArg} {arguments}",
+            workingDirectory,
+            line =>
             {
                 if (string.IsNullOrEmpty(line))
                     return false;
@@ -281,10 +382,10 @@ public static class Svn
                 if (line.Length < 8 || line[7] != ' ' || line[8] == ' ')
                     return true;
 
-                fileStatusDict.Add(line.Substring(8).Replace('\\', '/'),
-                    line.Substring(0, 7));
+                fileStatusDict.Add(line.Substring(8).Replace('\\', '/'), line.Substring(0, 7));
                 return true;
-            });
+            }
+        );
 
         return runResult ? fileStatusDict : null;
     }
@@ -350,91 +451,117 @@ public static class Svn
     {
         var svnInfo = new SvnInfo();
 
-        var runResult = await RunWithProcessOutput($"info \"{path}\"", "", line =>
-        {
-            if (string.IsNullOrEmpty(line))
-                return false;
-
-            var sepIndex = line.IndexOf(":", StringComparison.Ordinal);
-            if (sepIndex == -1)
-                return true;
-
-            var key = line.Substring(0, sepIndex);
-            var value = line.Substring(sepIndex + 1).Trim();
-            switch (key)
+        var runResult = await RunWithProcessOutput(
+            $"info \"{path}\"",
+            "",
+            line =>
             {
-                case "Path":
-                    svnInfo.Path = value;
-                    break;
-                case "Working Copy Root Path":
-                    svnInfo.WorkingCopyRootPath = value;
-                    break;
-                case "URL":
-                    svnInfo.Url = value;
-                    break;
-                case "Relative URL":
-                    svnInfo.RelativeUrl = value;
-                    break;
-                case "Repository Root":
-                    svnInfo.RepositoryRoot = value;
-                    break;
-                case "Repository UUID":
-                    svnInfo.RepositoryUuid = value;
-                    break;
-                case "Revision":
-                    svnInfo.Revision = value;
-                    break;
-                case "Node Kind":
-                    svnInfo.NodeKind = value;
-                    break;
-                case "Schedule":
-                    svnInfo.Schedule = value;
-                    break;
-                case "Last Changed Author":
-                    svnInfo.LastChangedAuthor = value;
-                    break;
-                case "Last Changed Rev":
-                    svnInfo.LastChangedRev = value;
-                    break;
-                case "Last Changed Date":
-                    svnInfo.LastChangedDate = value;
-                    break;
-            }
+                if (string.IsNullOrEmpty(line))
+                    return false;
 
-            return true;
-        });
+                var sepIndex = line.IndexOf(":", StringComparison.Ordinal);
+                if (sepIndex == -1)
+                    return true;
+
+                var key = line.Substring(0, sepIndex);
+                var value = line.Substring(sepIndex + 1).Trim();
+                switch (key)
+                {
+                    case "Path":
+                        svnInfo.Path = value;
+                        break;
+                    case "Working Copy Root Path":
+                        svnInfo.WorkingCopyRootPath = value;
+                        break;
+                    case "URL":
+                        svnInfo.Url = value;
+                        break;
+                    case "Relative URL":
+                        svnInfo.RelativeUrl = value;
+                        break;
+                    case "Repository Root":
+                        svnInfo.RepositoryRoot = value;
+                        break;
+                    case "Repository UUID":
+                        svnInfo.RepositoryUuid = value;
+                        break;
+                    case "Revision":
+                        svnInfo.Revision = value;
+                        break;
+                    case "Node Kind":
+                        svnInfo.NodeKind = value;
+                        break;
+                    case "Schedule":
+                        svnInfo.Schedule = value;
+                        break;
+                    case "Last Changed Author":
+                        svnInfo.LastChangedAuthor = value;
+                        break;
+                    case "Last Changed Rev":
+                        svnInfo.LastChangedRev = value;
+                        break;
+                    case "Last Changed Date":
+                        svnInfo.LastChangedDate = value;
+                        break;
+                }
+
+                return true;
+            }
+        );
 
         return runResult ? svnInfo : null;
     }
 
-    public static bool SetDepthSync(string path, string depth, string arguments = "", string workingDirectory = "")
+    public static bool SetDepthSync(
+        string path,
+        string depth,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return AsyncHelper.RunSync(() => SetDepth(path, depth, arguments, workingDirectory));
     }
 
-    public static bool SetDepthSync(string[] paths, string depth, string arguments = "", string workingDirectory = "")
+    public static bool SetDepthSync(
+        string[] paths,
+        string depth,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return AsyncHelper.RunSync(() => SetDepth(paths, depth, arguments, workingDirectory));
     }
 
-    public static async Task<bool> SetDepth(string path, string depth, string arguments = "", string workingDirectory = "")
+    public static async Task<bool> SetDepth(
+        string path,
+        string depth,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return await SetDepth(new[] { path }, depth, arguments, workingDirectory);
     }
 
-    public static async Task<bool> SetDepth(string[] paths, string depth, string arguments = "", string workingDirectory = "")
+    public static async Task<bool> SetDepth(
+        string[] paths,
+        string depth,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         if (paths.Length == 0)
             return false;
 
         using (var fileListArg = new FileListArgument(paths, true))
         {
-            return await Run(new ProcessStartInfo
-            {
-                FileName = ExePath,
-                Arguments = $"update --set-depth {depth} {fileListArg} {arguments}",
-                WorkingDirectory = workingDirectory,
-            });
+            return await Run(
+                new ProcessStartInfo
+                {
+                    FileName = ExePath,
+                    Arguments = $"update --set-depth {depth} {fileListArg} {arguments}",
+                    WorkingDirectory = workingDirectory,
+                }
+            );
         }
     }
 
@@ -459,15 +586,21 @@ public static class Svn
     {
         using var fileListArg = new FileListArgument(paths, true);
 
-        var (success, output) = await RunWithProcessOutput($"status --show-updates --xml {fileListArg}", workingDirectory);
+        var (success, output) = await RunWithProcessOutput(
+            $"status --show-updates --xml {fileListArg}",
+            workingDirectory
+        );
         if (!success)
             return new bool[paths.Length];
 
         var xml = XDocument.Parse(output);
-        return xml.Element("status")?
-            .Elements("target")
-            .Select(target => target.Element("entry")?.Element("repos-status")?.Attribute("item")?.Value == "modified")
-            .ToArray() ?? new bool[paths.Length];
+        return xml.Element("status")
+                ?.Elements("target")
+                .Select(target =>
+                    target.Element("entry")?.Element("repos-status")?.Attribute("item")?.Value
+                    == "modified"
+                )
+                .ToArray() ?? new bool[paths.Length];
     }
 
     public static async Task<bool> HasUpdate(string path, string workingDirectory)
@@ -491,31 +624,45 @@ public static class Svn
         return AsyncHelper.RunSync(() => CleanUp(path, arguments, workingDirectory));
     }
 
-    public static bool CleanUpSync(string[] paths, string arguments = "", string workingDirectory = "")
+    public static bool CleanUpSync(
+        string[] paths,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return AsyncHelper.RunSync(() => CleanUp(paths, arguments, workingDirectory));
     }
 
-    public static async Task<bool> CleanUp(string path, string arguments = "", string workingDirectory = "")
+    public static async Task<bool> CleanUp(
+        string path,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return await CleanUp(new[] { path }, arguments, workingDirectory);
     }
 
-    public static async Task<bool> CleanUp(string[] paths, string arguments = "", string workingDirectory = "")
+    public static async Task<bool> CleanUp(
+        string[] paths,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         if (paths.Length == 0)
             return false;
 
         using (var fileListArg = new FileListArgument(paths, true))
         {
-            return await Run(new ProcessStartInfo
-            {
-                FileName = ExePath,
-                Arguments = $"cleanup {arguments} {fileListArg}",
-                WorkingDirectory = workingDirectory,
-                CreateNoWindow = true,
-                UseShellExecute = false,
-            });
+            return await Run(
+                new ProcessStartInfo
+                {
+                    FileName = ExePath,
+                    Arguments = $"cleanup {arguments} {fileListArg}",
+                    WorkingDirectory = workingDirectory,
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                }
+            );
         }
     }
 
@@ -528,12 +675,15 @@ public static class Svn
     {
         var result = -1;
         await RunWithProcessOutput(
-            $"info --show-item last-changed-revision {path}", "", line =>
+            $"info --show-item last-changed-revision {path}",
+            "",
+            line =>
             {
                 if (int.TryParse(line, out var value))
                     result = value;
                 return false;
-            });
+            }
+        );
         return result;
     }
 
@@ -546,12 +696,15 @@ public static class Svn
     {
         var result = -1;
         await RunWithProcessOutput(
-            $"info -r HEAD --show-item last-changed-revision {path}", "", line =>
+            $"info -r HEAD --show-item last-changed-revision {path}",
+            "",
+            line =>
             {
                 if (int.TryParse(line, out var value))
                     result = value;
                 return false;
-            });
+            }
+        );
         return result;
     }
 
@@ -562,13 +715,15 @@ public static class Svn
 
     public static async Task<bool> Relocate(string svnRootDirectory, string oldUrl, string newUrl)
     {
-        using var proc = Process.Start(new ProcessStartInfo
-        {
-            FileName = ExePath,
-            Arguments = $"switch --relocate {oldUrl} {newUrl}",
-            WorkingDirectory = svnRootDirectory,
-            UseShellExecute = true,
-        });
+        using var proc = Process.Start(
+            new ProcessStartInfo
+            {
+                FileName = ExePath,
+                Arguments = $"switch --relocate {oldUrl} {newUrl}",
+                WorkingDirectory = svnRootDirectory,
+                UseShellExecute = true,
+            }
+        );
 
         if (proc == null)
             return false;
@@ -588,22 +743,32 @@ public static class Svn
         return AsyncHelper.RunSync(() => Add(paths, arguments, workingDirectory));
     }
 
-    public static async Task<bool> Add(string path, string arguments = "", string workingDirectory = "")
+    public static async Task<bool> Add(
+        string path,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         return await Revert(new[] { path }, arguments, workingDirectory);
     }
 
-    public static async Task<bool> Add(string[] paths, string arguments = "", string workingDirectory = "")
+    public static async Task<bool> Add(
+        string[] paths,
+        string arguments = "",
+        string workingDirectory = ""
+    )
     {
         if (paths.Length == 0)
             return false;
 
         using var fileListArg = new FileListArgument(paths, false);
-        return await Run(new ProcessStartInfo
-        {
-            FileName = ExePath,
-            Arguments = $"add {fileListArg} {arguments} --parents",
-            WorkingDirectory = workingDirectory,
-        });
+        return await Run(
+            new ProcessStartInfo
+            {
+                FileName = ExePath,
+                Arguments = $"add {fileListArg} {arguments} --parents",
+                WorkingDirectory = workingDirectory,
+            }
+        );
     }
 }

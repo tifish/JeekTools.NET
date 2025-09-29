@@ -54,7 +54,10 @@ public static class HttpHelper
     {
         var client = new HttpClient { Timeout = TimeSpan.FromSeconds(timeoutSeconds) };
         // act like a Chrome browser
-        client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3");
+        client.DefaultRequestHeaders.Add(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
+        );
         return client;
     }
 
@@ -100,11 +103,18 @@ public static class HttpHelper
         }
     }
 
-    public static async Task<string?> DownloadFile(string url, string downloadDirectory, Action<double>? progressCallback = null)
+    public static async Task<string?> DownloadFile(
+        string url,
+        string downloadDirectory,
+        Action<double>? progressCallback = null
+    )
     {
         // Use GET request to download the file
         using var client = GetHttpClient();
-        using var getResponse = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+        using var getResponse = await client.GetAsync(
+            url,
+            HttpCompletionOption.ResponseHeadersRead
+        );
         if (getResponse == null || !getResponse.IsSuccessStatusCode)
             return null;
 
@@ -123,9 +133,19 @@ public static class HttpHelper
         long totalRead = 0;
         int read;
         using (var contentStream = await getResponse.Content.ReadAsStreamAsync())
-        using (var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None))
+        using (
+            var fileStream = new FileStream(
+                filePath,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.None
+            )
+        )
         {
-            while ((read = await contentStream.ReadAsync(buffer.AsMemory(), CancellationToken.None)) > 0)
+            while (
+                (read = await contentStream.ReadAsync(buffer.AsMemory(), CancellationToken.None))
+                > 0
+            )
             {
                 await fileStream.WriteAsync(buffer.AsMemory(0, read));
                 totalRead += read;

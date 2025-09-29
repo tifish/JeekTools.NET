@@ -25,7 +25,7 @@ public static class UserActivityDetector
     {
         var lastInputInfo = new LASTINPUTINFO
         {
-            cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO))
+            cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO)),
         };
 
         if (GetLastInputInfo(ref lastInputInfo))
@@ -48,7 +48,7 @@ public static class UserActivityDetector
     {
         var lastInputInfo = new LASTINPUTINFO
         {
-            cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO))
+            cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO)),
         };
 
         if (GetLastInputInfo(ref lastInputInfo))

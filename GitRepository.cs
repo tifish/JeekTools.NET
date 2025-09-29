@@ -18,20 +18,19 @@ public class GitRepository
 
     public async Task<bool> RunGitCommand(string arguments)
     {
-        using var process = Process.Start(new ProcessStartInfo
-        {
-            FileName = ExePath,
-            Arguments = arguments,
-            WorkingDirectory = RootPath,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-            EnvironmentVariables =
+        using var process = Process.Start(
+            new ProcessStartInfo
             {
-                ["GIT_TERMINAL_PROMPT"] = "0",
-            },
-        });
+                FileName = ExePath,
+                Arguments = arguments,
+                WorkingDirectory = RootPath,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+                EnvironmentVariables = { ["GIT_TERMINAL_PROMPT"] = "0" },
+            }
+        );
 
         if (process == null)
             return false;
@@ -84,9 +83,7 @@ public class GitRepository
         public char WorkingTreeStatus = ' ';
         public string Path = "";
 
-        public GitFileStatus()
-        {
-        }
+        public GitFileStatus() { }
     }
 
     public async Task<GitFileStatus[]> GetFilesStatus(params string[] paths)
@@ -100,10 +97,7 @@ public class GitRepository
 
     private GitFileStatus[] GetFilesStatusFromLastOutput()
     {
-        var lines = LastOutput
-            .Split("\n")
-            .Where(line => !string.IsNullOrEmpty(line))
-            .ToList();
+        var lines = LastOutput.Split("\n").Where(line => !string.IsNullOrEmpty(line)).ToList();
         var statusList = new GitFileStatus[lines.Count];
         for (var i = 0; i < lines.Count; i++)
         {

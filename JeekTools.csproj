@@ -1,5 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -7,9 +6,7 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="ZLogger" Version="2.5.10" />
   </ItemGroup>
-
 </Project>

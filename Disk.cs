@@ -25,6 +25,7 @@ public static class Disk
     {
         public uint Version;
         public uint Size;
+
         [MarshalAs(UnmanagedType.U1)]
         public bool IncursSeekPenalty;
     }
@@ -34,6 +35,7 @@ public static class Disk
     {
         public int PropertyId;
         public int QueryType;
+
         [MarshalAs(UnmanagedType.ByValArray, SizeConst = 1)]
         public byte[] AdditionalParameters;
     }
@@ -44,23 +46,38 @@ public static class Disk
 
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern SafeFileHandle CreateFile(
-        string lpFileName, uint dwDesiredAccess, uint dwShareMode,
-        IntPtr lpSecurityAttributes, uint dwCreationDisposition,
-        uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+        string lpFileName,
+        uint dwDesiredAccess,
+        uint dwShareMode,
+        IntPtr lpSecurityAttributes,
+        uint dwCreationDisposition,
+        uint dwFlagsAndAttributes,
+        IntPtr hTemplateFile
+    );
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool DeviceIoControl(
-        SafeFileHandle hDevice, uint dwIoControlCode,
-        IntPtr lpInBuffer, int nInBufferSize,
-        out VOLUME_DISK_EXTENTS lpOutBuffer, int nOutBufferSize,
-        out int lpBytesReturned, IntPtr lpOverlapped);
+        SafeFileHandle hDevice,
+        uint dwIoControlCode,
+        IntPtr lpInBuffer,
+        int nInBufferSize,
+        out VOLUME_DISK_EXTENTS lpOutBuffer,
+        int nOutBufferSize,
+        out int lpBytesReturned,
+        IntPtr lpOverlapped
+    );
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool DeviceIoControl(
-        SafeFileHandle hDevice, uint dwIoControlCode,
-        ref STORAGE_PROPERTY_QUERY lpInBuffer, int nInBufferSize,
-        ref DEVICE_SEEK_PENALTY_DESCRIPTOR lpOutBuffer, int nOutBufferSize,
-        out uint lpBytesReturned, IntPtr lpOverlapped);
+        SafeFileHandle hDevice,
+        uint dwIoControlCode,
+        ref STORAGE_PROPERTY_QUERY lpInBuffer,
+        int nInBufferSize,
+        ref DEVICE_SEEK_PENALTY_DESCRIPTOR lpOutBuffer,
+        int nOutBufferSize,
+        out uint lpBytesReturned,
+        IntPtr lpOverlapped
+    );
 
     /// <summary>
     /// Detect whether the specified logical drive is an SSD
@@ -92,10 +109,18 @@ public static class Disk
         if (handle.IsInvalid)
             throw new InvalidOperationException($"Cannot open logical drive {driveLetter}");
 
-        if (!DeviceIoControl(handle, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
-            IntPtr.Zero, 0,
-            out var extents, Marshal.SizeOf(typeof(VOLUME_DISK_EXTENTS)),
-            out _, IntPtr.Zero))
+        if (
+            !DeviceIoControl(
+                handle,
+                IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+                IntPtr.Zero,
+                0,
+                out var extents,
+                Marshal.SizeOf(typeof(VOLUME_DISK_EXTENTS)),
+                out _,
+                IntPtr.Zero
+            )
+        )
         {
             throw new InvalidOperationException("Cannot get physical disk number");
         }
@@ -116,14 +141,22 @@ public static class Disk
         {
             PropertyId = StorageDeviceSeekPenaltyProperty,
             QueryType = 0,
-            AdditionalParameters = new byte[1]
+            AdditionalParameters = new byte[1],
         };
         var desc = new DEVICE_SEEK_PENALTY_DESCRIPTOR();
 
-        if (!DeviceIoControl(handle, IOCTL_STORAGE_QUERY_PROPERTY,
-            ref query, Marshal.SizeOf(typeof(STORAGE_PROPERTY_QUERY)),
-            ref desc, Marshal.SizeOf(typeof(DEVICE_SEEK_PENALTY_DESCRIPTOR)),
-            out _, IntPtr.Zero))
+        if (
+            !DeviceIoControl(
+                handle,
+                IOCTL_STORAGE_QUERY_PROPERTY,
+                ref query,
+                Marshal.SizeOf(typeof(STORAGE_PROPERTY_QUERY)),
+                ref desc,
+                Marshal.SizeOf(typeof(DEVICE_SEEK_PENALTY_DESCRIPTOR)),
+                out _,
+                IntPtr.Zero
+            )
+        )
         {
             throw new InvalidOperationException("Cannot detect disk properties");
         }

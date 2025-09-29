@@ -55,8 +55,13 @@ public static class LogManager
 
             if (ToFile)
             {
-                var appName = Path.GetFileNameWithoutExtension(Assembly.GetEntryAssembly()?.Location) ?? "Unknown";
-                var logsDir = Path.Combine(AppDomain.CurrentDomain.SetupInformation.ApplicationBase ?? string.Empty, LogsDirectory);
+                var appName =
+                    Path.GetFileNameWithoutExtension(Assembly.GetEntryAssembly()?.Location)
+                    ?? "Unknown";
+                var logsDir = Path.Combine(
+                    AppDomain.CurrentDomain.SetupInformation.ApplicationBase ?? string.Empty,
+                    LogsDirectory
+                );
 
                 // For each file in logsDir, if the file time is older than Now - RetainFileLimit, delete it.
                 if (Directory.Exists(logsDir))
@@ -81,7 +86,10 @@ public static class LogManager
                 {
                     options.FilePathSelector = (timestamp, sequenceNumber) =>
                     {
-                        CurrentLogFile = Path.Join(logsDir, $"{appName}_{timestamp.ToLocalTime():yyyy-MM-dd_HH-mm-ss}_{sequenceNumber}.log");
+                        CurrentLogFile = Path.Join(
+                            logsDir,
+                            $"{appName}_{timestamp.ToLocalTime():yyyy-MM-dd_HH-mm-ss}_{sequenceNumber}.log"
+                        );
                         return CurrentLogFile;
                     };
                     options.RollingInterval = RollingInterval;
@@ -94,11 +102,18 @@ public static class LogManager
             {
                 options.UsePlainTextFormatter(formatter =>
                 {
-                    formatter.SetPrefixFormatter($"{0} [{1:short}] [{2}] ",
+                    formatter.SetPrefixFormatter(
+                        $"{0} [{1:short}] [{2}] ",
                         (in MessageTemplate template, in LogInfo info) =>
-                            template.Format(info.Timestamp, info.LogLevel, info.Category));
-                    formatter.SetExceptionFormatter((writer, ex)
-                        => Utf8String.Format(writer, $"\n{ex.GetType().Name}: {ex.Message}\n{ex.StackTrace ?? ""}"));
+                            template.Format(info.Timestamp, info.LogLevel, info.Category)
+                    );
+                    formatter.SetExceptionFormatter(
+                        (writer, ex) =>
+                            Utf8String.Format(
+                                writer,
+                                $"\n{ex.GetType().Name}: {ex.Message}\n{ex.StackTrace ?? ""}"
+                            )
+                    );
                 });
             }
         });
@@ -107,7 +122,10 @@ public static class LogManager
     public static void DisableLogging()
     {
         _factory?.Dispose();
-        _factory = LoggerFactory.Create(logging => { logging.ClearProviders(); });
+        _factory = LoggerFactory.Create(logging =>
+        {
+            logging.ClearProviders();
+        });
     }
 
     public static string CurrentLogFile { get; private set; } = "";

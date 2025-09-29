@@ -8,7 +8,7 @@ public static class GitHubMirrors
         [
             url,
             url.Replace("https://github.com/", "https://ghfast.top/https://github.com/"),
-            url.Replace("https://github.com/", "https://gh-proxy.com/github.com/")
+            url.Replace("https://github.com/", "https://gh-proxy.com/github.com/"),
         ];
     }
 
@@ -43,36 +43,56 @@ public static class GitHubMirrors
         var ctsList = mirrors.Select(_ => new CancellationTokenSource()).ToList();
 
         // Test mirror speed
-        var tasks = mirrors.Select((mirror, idx) =>
-        {
-            var cts = ctsList[idx];
-            return Task.Run(async () =>
-            {
-                try
+        var tasks = mirrors
+            .Select(
+                (mirror, idx) =>
                 {
-                    using var client = HttpHelper.GetHttpClient();
-                    var request = new HttpRequestMessage(HttpMethod.Get, mirror);
-                    request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 102399);
+                    var cts = ctsList[idx];
+                    return Task.Run(
+                        async () =>
+                        {
+                            try
+                            {
+                                using var client = HttpHelper.GetHttpClient();
+                                var request = new HttpRequestMessage(HttpMethod.Get, mirror);
+                                request.Headers.Range =
+                                    new System.Net.Http.Headers.RangeHeaderValue(0, 102399);
 
-                    using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-                    response.EnsureSuccessStatusCode();
-                    using var stream = await response.Content.ReadAsStreamAsync();
-                    var buffer = new byte[102400];
-                    int read = 0, total = 0;
-                    while ((read = await stream.ReadAsync(
-                        buffer.AsMemory(total, buffer.Length - total), cts.Token)) > 0 && total < buffer.Length)
-                    {
-                        total += read;
-                    }
+                                using var response = await client.SendAsync(
+                                    request,
+                                    HttpCompletionOption.ResponseHeadersRead,
+                                    cts.Token
+                                );
+                                response.EnsureSuccessStatusCode();
+                                using var stream = await response.Content.ReadAsStreamAsync();
+                                var buffer = new byte[102400];
+                                int read = 0,
+                                    total = 0;
+                                while (
+                                    (
+                                        read = await stream.ReadAsync(
+                                            buffer.AsMemory(total, buffer.Length - total),
+                                            cts.Token
+                                        )
+                                    ) > 0
+                                    && total < buffer.Length
+                                )
+                                {
+                                    total += read;
+                                }
 
-                    return (true, idx);
+                                return (true, idx);
+                            }
+                            catch
+                            {
+                                return (false, idx);
+                            }
+                        },
+                        cts.Token
+                    );
                 }
-                catch
-                {
-                    return (false, idx);
-                }
-            }, cts.Token);
-        }).ToList();
+            )
+            .ToList();
 
         // Wait for the fastest mirror
         while (tasks.Count > 0)

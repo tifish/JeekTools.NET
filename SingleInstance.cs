@@ -54,42 +54,45 @@ public class SingleInstance : IDisposable
     {
         _cancellationTokenSource = new CancellationTokenSource();
 
-        Task.Run(async () =>
-        {
-            while (!_cancellationTokenSource.Token.IsCancellationRequested)
+        Task.Run(
+            async () =>
             {
-                try
+                while (!_cancellationTokenSource.Token.IsCancellationRequested)
                 {
-                    _pipeServer = new NamedPipeServerStream(_pipeName, PipeDirection.In);
-                    await _pipeServer.WaitForConnectionAsync(_cancellationTokenSource.Token);
-
-                    using var reader = new StreamReader(_pipeServer);
-                    var message = await reader.ReadLineAsync();
-
-                    if (message == ShowWindowMessage)
+                    try
                     {
-                        showWindowCallback?.Invoke();
-                    }
+                        _pipeServer = new NamedPipeServerStream(_pipeName, PipeDirection.In);
+                        await _pipeServer.WaitForConnectionAsync(_cancellationTokenSource.Token);
 
-                    _pipeServer.Disconnect();
+                        using var reader = new StreamReader(_pipeServer);
+                        var message = await reader.ReadLineAsync();
+
+                        if (message == ShowWindowMessage)
+                        {
+                            showWindowCallback?.Invoke();
+                        }
+
+                        _pipeServer.Disconnect();
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Expected when cancellation is requested
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"IPC Server error: {ex.Message}");
+                        await Task.Delay(1000, _cancellationTokenSource.Token); // Wait before retrying
+                    }
+                    finally
+                    {
+                        _pipeServer?.Dispose();
+                        _pipeServer = null;
+                    }
                 }
-                catch (OperationCanceledException)
-                {
-                    // Expected when cancellation is requested
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"IPC Server error: {ex.Message}");
-                    await Task.Delay(1000, _cancellationTokenSource.Token); // Wait before retrying
-                }
-                finally
-                {
-                    _pipeServer?.Dispose();
-                    _pipeServer = null;
-                }
-            }
-        }, _cancellationTokenSource.Token);
+            },
+            _cancellationTokenSource.Token
+        );
     }
 
     public void Dispose()

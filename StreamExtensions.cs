@@ -2,8 +2,13 @@
 
 public static class StreamExtensions
 {
-    public static async Task CopyToAsync(this Stream source, Stream destination, int bufferSize,
-        IProgress<long>? progress = null, CancellationToken cancellationToken = default)
+    public static async Task CopyToAsync(
+        this Stream source,
+        Stream destination,
+        int bufferSize,
+        IProgress<long>? progress = null,
+        CancellationToken cancellationToken = default
+    )
     {
         if (source == null)
             throw new ArgumentNullException(nameof(source));
@@ -19,9 +24,14 @@ public static class StreamExtensions
         var buffer = new byte[bufferSize];
         long totalBytesRead = 0;
         int bytesRead;
-        while ((bytesRead = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) != 0)
+        while (
+            (bytesRead = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false))
+            != 0
+        )
         {
-            await destination.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken).ConfigureAwait(false);
+            await destination
+                .WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken)
+                .ConfigureAwait(false);
             totalBytesRead += bytesRead;
             progress?.Report(totalBytesRead);
         }

@@ -8,15 +8,27 @@ public class PhysicalMonitorBrightnessController : IDisposable
 
     [DllImport("dxva2.dll", EntryPoint = "GetNumberOfPhysicalMonitorsFromHMONITOR")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetNumberOfPhysicalMonitorsFromHMONITOR(IntPtr hMonitor, ref uint pdwNumberOfPhysicalMonitors);
+    private static extern bool GetNumberOfPhysicalMonitorsFromHMONITOR(
+        IntPtr hMonitor,
+        ref uint pdwNumberOfPhysicalMonitors
+    );
 
     [DllImport("dxva2.dll", EntryPoint = "GetPhysicalMonitorsFromHMONITOR")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetPhysicalMonitorsFromHMONITOR(IntPtr hMonitor, uint dwPhysicalMonitorArraySize, [Out] PHYSICAL_MONITOR[] pPhysicalMonitorArray);
+    private static extern bool GetPhysicalMonitorsFromHMONITOR(
+        IntPtr hMonitor,
+        uint dwPhysicalMonitorArraySize,
+        [Out] PHYSICAL_MONITOR[] pPhysicalMonitorArray
+    );
 
     [DllImport("dxva2.dll", EntryPoint = "GetMonitorBrightness")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetMonitorBrightness(IntPtr handle, ref uint minimumBrightness, ref uint currentBrightness, ref uint maxBrightness);
+    private static extern bool GetMonitorBrightness(
+        IntPtr handle,
+        ref uint minimumBrightness,
+        ref uint currentBrightness,
+        ref uint maxBrightness
+    );
 
     [DllImport("dxva2.dll", EntryPoint = "SetMonitorBrightness")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -28,12 +40,25 @@ public class PhysicalMonitorBrightnessController : IDisposable
 
     [DllImport("dxva2.dll", EntryPoint = "DestroyPhysicalMonitors")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool DestroyPhysicalMonitors(uint dwPhysicalMonitorArraySize, [In] PHYSICAL_MONITOR[] pPhysicalMonitorArray);
+    public static extern bool DestroyPhysicalMonitors(
+        uint dwPhysicalMonitorArraySize,
+        [In] PHYSICAL_MONITOR[] pPhysicalMonitorArray
+    );
 
     [DllImport("user32.dll")]
-    private static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, EnumMonitorsDelegate lpfnEnum, IntPtr dwData);
+    private static extern bool EnumDisplayMonitors(
+        IntPtr hdc,
+        IntPtr lprcClip,
+        EnumMonitorsDelegate lpfnEnum,
+        IntPtr dwData
+    );
 
-    private delegate bool EnumMonitorsDelegate(IntPtr hMonitor, IntPtr hdcMonitor, ref Rect lprcMonitor, IntPtr dwData);
+    private delegate bool EnumMonitorsDelegate(
+        IntPtr hMonitor,
+        IntPtr hdcMonitor,
+        ref Rect lprcMonitor,
+        IntPtr dwData
+    );
 
     #endregion
 
@@ -59,7 +84,8 @@ public class PhysicalMonitorBrightnessController : IDisposable
         var isSomeFail = false;
         foreach (var monitor in Monitors)
         {
-            var realNewValue = (monitor.MaxValue - monitor.MinValue) * brightness / 100 + monitor.MinValue;
+            var realNewValue =
+                (monitor.MaxValue - monitor.MinValue) * brightness / 100 + monitor.MinValue;
             if (SetMonitorBrightness(monitor.Handle, realNewValue))
             {
                 monitor.CurrentValue = realNewValue;
@@ -92,39 +118,59 @@ public class PhysicalMonitorBrightnessController : IDisposable
         DisposeMonitors(Monitors);
 
         var monitors = new List<MonitorInfo>();
-        EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr hMonitor, IntPtr hdcMonitor, ref Rect lprcMonitor, IntPtr dwData) =>
-        {
-            uint physicalMonitorsCount = 0;
-            if (!GetNumberOfPhysicalMonitorsFromHMONITOR(hMonitor, ref physicalMonitorsCount))
-                // Cannot get monitor count
-                return true;
-
-            var physicalMonitors = new PHYSICAL_MONITOR[physicalMonitorsCount];
-            if (!GetPhysicalMonitorsFromHMONITOR(hMonitor, physicalMonitorsCount, physicalMonitors))
-                // Cannot get physical monitor handle
-                return true;
-
-            foreach (var physicalMonitor in physicalMonitors)
+        EnumDisplayMonitors(
+            IntPtr.Zero,
+            IntPtr.Zero,
+            (IntPtr hMonitor, IntPtr hdcMonitor, ref Rect lprcMonitor, IntPtr dwData) =>
             {
-                uint minValue = 0, currentValue = 0, maxValue = 0;
-                if (!GetMonitorBrightness(physicalMonitor.hPhysicalMonitor, ref minValue, ref currentValue, ref maxValue))
+                uint physicalMonitorsCount = 0;
+                if (!GetNumberOfPhysicalMonitorsFromHMONITOR(hMonitor, ref physicalMonitorsCount))
+                    // Cannot get monitor count
+                    return true;
+
+                var physicalMonitors = new PHYSICAL_MONITOR[physicalMonitorsCount];
+                if (
+                    !GetPhysicalMonitorsFromHMONITOR(
+                        hMonitor,
+                        physicalMonitorsCount,
+                        physicalMonitors
+                    )
+                )
+                    // Cannot get physical monitor handle
+                    return true;
+
+                foreach (var physicalMonitor in physicalMonitors)
                 {
-                    DestroyPhysicalMonitor(physicalMonitor.hPhysicalMonitor);
-                    continue;
+                    uint minValue = 0,
+                        currentValue = 0,
+                        maxValue = 0;
+                    if (
+                        !GetMonitorBrightness(
+                            physicalMonitor.hPhysicalMonitor,
+                            ref minValue,
+                            ref currentValue,
+                            ref maxValue
+                        )
+                    )
+                    {
+                        DestroyPhysicalMonitor(physicalMonitor.hPhysicalMonitor);
+                        continue;
+                    }
+
+                    var info = new MonitorInfo
+                    {
+                        Handle = physicalMonitor.hPhysicalMonitor,
+                        MinValue = minValue,
+                        CurrentValue = currentValue,
+                        MaxValue = maxValue,
+                    };
+                    monitors.Add(info);
                 }
 
-                var info = new MonitorInfo
-                {
-                    Handle = physicalMonitor.hPhysicalMonitor,
-                    MinValue = minValue,
-                    CurrentValue = currentValue,
-                    MaxValue = maxValue,
-                };
-                monitors.Add(info);
-            }
-
-            return true;
-        }, IntPtr.Zero);
+                return true;
+            },
+            IntPtr.Zero
+        );
 
         Monitors = monitors;
     }
@@ -139,7 +185,9 @@ public class PhysicalMonitorBrightnessController : IDisposable
     {
         if (monitors?.Any() == true)
         {
-            var monitorArray = monitors.Select(m => new PHYSICAL_MONITOR { hPhysicalMonitor = m.Handle }).ToArray();
+            var monitorArray = monitors
+                .Select(m => new PHYSICAL_MONITOR { hPhysicalMonitor = m.Handle })
+                .ToArray();
             DestroyPhysicalMonitors((uint)monitorArray.Length, monitorArray);
         }
     }

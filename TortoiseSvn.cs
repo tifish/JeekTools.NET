@@ -5,7 +5,9 @@ public static class TortoiseSvn
 {
     private static async Task<bool> ExecuteTortoiseProc(string arguments)
     {
-        var process = Process.Start(new ProcessStartInfo("TortoiseProc.exe", arguments) { UseShellExecute = true });
+        var process = Process.Start(
+            new ProcessStartInfo("TortoiseProc.exe", arguments) { UseShellExecute = true }
+        );
         if (process == null)
             return false;
         await process.WaitForExitAsync();
@@ -30,27 +32,37 @@ public static class TortoiseSvn
 
     public static async Task<bool> Commit(string[] paths, string arguments = "")
     {
-        return await ExecuteTortoiseProc($"/command:commit {await ToPathArguments(paths)} {arguments}");
+        return await ExecuteTortoiseProc(
+            $"/command:commit {await ToPathArguments(paths)} {arguments}"
+        );
     }
 
     public static async Task<bool> Update(string[] paths, string arguments = "")
     {
-        return await ExecuteTortoiseProc($"/command:update {await ToPathArguments(paths)} {arguments}");
+        return await ExecuteTortoiseProc(
+            $"/command:update {await ToPathArguments(paths)} {arguments}"
+        );
     }
 
     public static async Task<bool> Add(string[] paths, string arguments = "")
     {
-        return await ExecuteTortoiseProc($"/command:add {await ToPathArguments(paths)} {arguments}");
+        return await ExecuteTortoiseProc(
+            $"/command:add {await ToPathArguments(paths)} {arguments}"
+        );
     }
 
     public static async Task<bool> Remove(string[] paths, string arguments = "")
     {
-        return await ExecuteTortoiseProc($"/command:remove {await ToPathArguments(paths)} {arguments}");
+        return await ExecuteTortoiseProc(
+            $"/command:remove {await ToPathArguments(paths)} {arguments}"
+        );
     }
 
     public static async Task<bool> Revert(string[] paths, string arguments = "")
     {
-        return await ExecuteTortoiseProc($"/command:revert {await ToPathArguments(paths)} {arguments}");
+        return await ExecuteTortoiseProc(
+            $"/command:revert {await ToPathArguments(paths)} {arguments}"
+        );
     }
 
     public static async Task<bool> ShowLog(string path, string arguments = "")
@@ -65,7 +77,9 @@ public static class TortoiseSvn
 
     public static async Task<bool> Checkout(string url, string path, string arguments = "")
     {
-        return await ExecuteTortoiseProc($"/command:checkout /url:{url} /path:\"{path}\" {arguments}");
+        return await ExecuteTortoiseProc(
+            $"/command:checkout /url:{url} /path:\"{path}\" {arguments}"
+        );
     }
 
     public static async Task<bool> Resolve(string path, string arguments = "")

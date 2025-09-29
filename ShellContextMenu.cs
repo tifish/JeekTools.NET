@@ -20,14 +20,16 @@ public static class ShellContextMenu
 
     public static void UnregisterDirectory(params string[] keyNames)
     {
-        foreach (var parentKeyPath in new[]
-                 {
-                     $@"{MachineClasses}\{DirShell}",
-                     $@"{MachineClasses}\{DirBgShell}",
-                     $@"{UserClasses}\{DirShell}",
-                     $@"{UserClasses}\{DirBgShell}",
-                 })
-            foreach (var subKeyName in keyNames)
-                RegistryHelper.DeleteKey($@"{parentKeyPath}\{subKeyName}");
+        foreach (
+            var parentKeyPath in new[]
+            {
+                $@"{MachineClasses}\{DirShell}",
+                $@"{MachineClasses}\{DirBgShell}",
+                $@"{UserClasses}\{DirShell}",
+                $@"{UserClasses}\{DirBgShell}",
+            }
+        )
+        foreach (var subKeyName in keyNames)
+            RegistryHelper.DeleteKey($@"{parentKeyPath}\{subKeyName}");
     }
 }

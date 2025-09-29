@@ -45,7 +45,12 @@ public static class RegistryHelper
         Registry.SetValue(keyName, valueName, value, RegistryValueKind.Binary);
     }
 
-    public static void SetValue(string keyName, string? valueName, object value, RegistryValueKind valueKind)
+    public static void SetValue(
+        string keyName,
+        string? valueName,
+        object value,
+        RegistryValueKind valueKind
+    )
     {
         Registry.SetValue(keyName, valueName, value, valueKind);
     }
@@ -57,19 +62,24 @@ public static class RegistryHelper
         var baseKeyFromKeyName = num2 switch
         {
             10 => Registry.Users,
-            17 => char.ToUpperInvariant(keyName[6]) == 'L' ? Registry.ClassesRoot : Registry.CurrentUser,
+            17 => char.ToUpperInvariant(keyName[6]) == 'L'
+                ? Registry.ClassesRoot
+                : Registry.CurrentUser,
             18 => Registry.LocalMachine,
             19 => Registry.CurrentConfig,
             21 => Registry.PerformanceData,
             _ => null,
         };
 
-        if (baseKeyFromKeyName == null
-            || !keyName.StartsWith(baseKeyFromKeyName.Name, StringComparison.OrdinalIgnoreCase))
+        if (
+            baseKeyFromKeyName == null
+            || !keyName.StartsWith(baseKeyFromKeyName.Name, StringComparison.OrdinalIgnoreCase)
+        )
             throw new ArgumentException($"Invalid key name: {keyName}");
-        subKeyName = num1 == -1 || num1 == keyName.Length
-            ? string.Empty
-            : keyName.Substring(num1 + 1, keyName.Length - num1 - 1);
+        subKeyName =
+            num1 == -1 || num1 == keyName.Length
+                ? string.Empty
+                : keyName.Substring(num1 + 1, keyName.Length - num1 - 1);
 
         return baseKeyFromKeyName;
     }

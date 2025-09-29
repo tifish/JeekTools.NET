@@ -7,18 +7,20 @@ public static class PlasticScm
 {
     public static async Task<string> Run(string arguments, string workingDirectory)
     {
-        var process = Process.Start(new ProcessStartInfo
-        {
-            FileName = "cmd.exe",
-            // Output encoding of cm.exe varies with system locale, so we need to set it to UTF-8 manually
-            // Even more: In Windows 10 GBK the output is UTF-8, as in Windows 11 is GBK.
-            Arguments = $"/s /c \"chcp 65001 & cm.exe {arguments}\"",
-            WorkingDirectory = workingDirectory,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            StandardOutputEncoding = Encoding.UTF8,
-        });
+        var process = Process.Start(
+            new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                // Output encoding of cm.exe varies with system locale, so we need to set it to UTF-8 manually
+                // Even more: In Windows 10 GBK the output is UTF-8, as in Windows 11 is GBK.
+                Arguments = $"/s /c \"chcp 65001 & cm.exe {arguments}\"",
+                WorkingDirectory = workingDirectory,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                StandardOutputEncoding = Encoding.UTF8,
+            }
+        );
 
         if (process == null)
             return "";
@@ -27,28 +29,36 @@ public static class PlasticScm
         return await process.StandardOutput.ReadToEndAsync();
     }
 
-    public static async Task<(string, string)> RunWithError(string arguments, string workingDirectory)
+    public static async Task<(string, string)> RunWithError(
+        string arguments,
+        string workingDirectory
+    )
     {
-        var process = Process.Start(new ProcessStartInfo
-        {
-            FileName = "cmd.exe",
-            // Output encoding of cm.exe varies with system locale, so we need to set it to UTF-8 manually
-            // Even more: In Windows 10 GBK the output is UTF-8, as in Windows 11 is GBK.
-            Arguments = $"/s /c \"chcp 65001 & cm.exe {arguments}\"",
-            WorkingDirectory = workingDirectory,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            RedirectStandardError = true,
-            StandardErrorEncoding = Encoding.UTF8,
-        });
+        var process = Process.Start(
+            new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                // Output encoding of cm.exe varies with system locale, so we need to set it to UTF-8 manually
+                // Even more: In Windows 10 GBK the output is UTF-8, as in Windows 11 is GBK.
+                Arguments = $"/s /c \"chcp 65001 & cm.exe {arguments}\"",
+                WorkingDirectory = workingDirectory,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                RedirectStandardError = true,
+                StandardErrorEncoding = Encoding.UTF8,
+            }
+        );
 
         if (process == null)
             return ("", "");
 
         await process.StandardOutput.ReadLineAsync(); // skip chcp output
-        return (await process.StandardOutput.ReadToEndAsync(), await process.StandardError.ReadToEndAsync());
+        return (
+            await process.StandardOutput.ReadToEndAsync(),
+            await process.StandardError.ReadToEndAsync()
+        );
     }
 
     public static async Task<string> GetCurrentBranch(string workingDirectory)
@@ -93,7 +103,10 @@ public static class PlasticScm
         public string Path = "";
     }
 
-    public static async Task<List<LockFileInfo>> GetLockFiles(string server, string workingDirectory)
+    public static async Task<List<LockFileInfo>> GetLockFiles(
+        string server,
+        string workingDirectory
+    )
     {
         var serverArg = server == "" ? "" : $" --server={server}";
         var output = await Run($"lock list{serverArg} --machinereadable", workingDirectory);
@@ -109,13 +122,15 @@ public static class PlasticScm
             var sep2 = line.IndexOf(' ', sep1 + 1);
             var sep3 = line.IndexOf(' ', sep2 + 1);
 
-            result.Add(new LockFileInfo
-            {
-                ID = line[..sep1],
-                Owner = line[(sep1 + 1)..sep2],
-                Workspace = line[(sep2 + 1)..sep3],
-                Path = line[(sep3 + 1)..],
-            });
+            result.Add(
+                new LockFileInfo
+                {
+                    ID = line[..sep1],
+                    Owner = line[(sep1 + 1)..sep2],
+                    Workspace = line[(sep2 + 1)..sep3],
+                    Path = line[(sep3 + 1)..],
+                }
+            );
         }
 
         return result;
@@ -138,7 +153,9 @@ public static class PlasticScm
     /// <returns>error message if any</returns>
     public static async Task<string> Update(string workingDirectory)
     {
-        var cmd = await IsPartial(workingDirectory) ? "partial update --machinereadable" : "update --machinereadable";
+        var cmd = await IsPartial(workingDirectory)
+            ? "partial update --machinereadable"
+            : "update --machinereadable";
         var (_, error) = await RunWithError(cmd, workingDirectory);
 
         return error;

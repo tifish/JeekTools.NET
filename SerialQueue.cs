@@ -22,7 +22,10 @@ public class SerialQueue
             Task<T> resultTask;
 
             if (_lastTask.TryGetTarget(out lastTask))
-                resultTask = lastTask.ContinueWith(_ => function(), TaskContinuationOptions.ExecuteSynchronously);
+                resultTask = lastTask.ContinueWith(
+                    _ => function(),
+                    TaskContinuationOptions.ExecuteSynchronously
+                );
             else
                 resultTask = Task.Run(function);
 
@@ -40,7 +43,9 @@ public class SerialQueue
             Task resultTask;
 
             if (_lastTask.TryGetTarget(out lastTask))
-                resultTask = lastTask.ContinueWith(_ => asyncAction(), TaskContinuationOptions.ExecuteSynchronously).Unwrap();
+                resultTask = lastTask
+                    .ContinueWith(_ => asyncAction(), TaskContinuationOptions.ExecuteSynchronously)
+                    .Unwrap();
             else
                 resultTask = Task.Run(asyncAction);
 
@@ -58,7 +63,12 @@ public class SerialQueue
             Task<T> resultTask;
 
             if (_lastTask.TryGetTarget(out lastTask))
-                resultTask = lastTask.ContinueWith(_ => asyncFunction(), TaskContinuationOptions.ExecuteSynchronously).Unwrap();
+                resultTask = lastTask
+                    .ContinueWith(
+                        _ => asyncFunction(),
+                        TaskContinuationOptions.ExecuteSynchronously
+                    )
+                    .Unwrap();
             else
                 resultTask = Task.Run(asyncFunction);
 

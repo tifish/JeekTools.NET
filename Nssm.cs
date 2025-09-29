@@ -5,17 +5,20 @@ namespace JeekTools;
 
 public static class Nssm
 {
-    public static string NssmPath { get; set; } = Path.Join(AppContext.BaseDirectory, "Nssm", "nssm.exe");
+    public static string NssmPath { get; set; } =
+        Path.Join(AppContext.BaseDirectory, "Nssm", "nssm.exe");
 
     private static Process? CallNssm(string command)
     {
-        return Process.Start(new ProcessStartInfo(NssmPath, command)
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        });
+        return Process.Start(
+            new ProcessStartInfo(NssmPath, command)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            }
+        );
     }
 
     public static string LastOutput { get; private set; } = "";
@@ -32,7 +35,11 @@ public static class Nssm
         return process.ExitCode == 0;
     }
 
-    public static async Task<bool> InstallService(string serviceName, string fileName, string arguments)
+    public static async Task<bool> InstallService(
+        string serviceName,
+        string fileName,
+        string arguments
+    )
     {
         return await CallNssmAndWait($"""install "{serviceName}" "{fileName}" {arguments}""");
     }
@@ -59,7 +66,9 @@ public static class Nssm
 
     public static async Task<ServiceStatus> GetServiceStatus(string serviceName)
     {
-        var statusString = (await Executor.RunWithOutput(NssmPath, $"""status "{serviceName}" """)).Trim();
+        var statusString = (
+            await Executor.RunWithOutput(NssmPath, $"""status "{serviceName}" """)
+        ).Trim();
         return statusString switch
         {
             "SERVICE_STOPPED" => ServiceStatus.Stopped,
@@ -72,7 +81,6 @@ public static class Nssm
             _ => ServiceStatus.None,
         };
     }
-
 }
 
 public enum ServiceStatus
@@ -86,4 +94,3 @@ public enum ServiceStatus
     PausePending = 6,
     Paused = 7,
 }
-

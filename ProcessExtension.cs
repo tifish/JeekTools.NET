@@ -32,15 +32,14 @@ public class Is64BitChecker
 {
     [DllImport("kernel32.dll", SetLastError = true, CallingConvention = CallingConvention.Winapi)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool IsWow64Process(
-        [In] IntPtr hProcess,
-        [Out] out bool wow64Process
-    );
+    private static extern bool IsWow64Process([In] IntPtr hProcess, [Out] out bool wow64Process);
 
     public static bool GetProcessIsWow64(IntPtr hProcess)
     {
-        if ((Environment.OSVersion.Version.Major == 5 && Environment.OSVersion.Version.Minor >= 1) ||
-            Environment.OSVersion.Version.Major >= 6)
+        if (
+            (Environment.OSVersion.Version.Major == 5 && Environment.OSVersion.Version.Minor >= 1)
+            || Environment.OSVersion.Version.Major >= 6
+        )
         {
             bool retVal;
             if (!IsWow64Process(hProcess, out retVal))
@@ -54,8 +53,10 @@ public class Is64BitChecker
 
     public static bool InternalCheckIsWow64()
     {
-        if ((Environment.OSVersion.Version.Major == 5 && Environment.OSVersion.Version.Minor >= 1) ||
-            Environment.OSVersion.Version.Major >= 6)
+        if (
+            (Environment.OSVersion.Version.Major == 5 && Environment.OSVersion.Version.Minor >= 1)
+            || Environment.OSVersion.Version.Major >= 6
+        )
             using (var p = Process.GetCurrentProcess())
             {
                 bool retVal;
@@ -74,7 +75,8 @@ public class Is64BitChecker
 public static class ProcessExtension
 {
     public static readonly bool Is64BitProcess = IntPtr.Size > 4;
-    public static readonly bool Is64BitOperatingSystem = Is64BitProcess || Is64BitChecker.InternalCheckIsWow64();
+    public static readonly bool Is64BitOperatingSystem =
+        Is64BitProcess || Is64BitChecker.InternalCheckIsWow64();
 
     public static string? GetCurrentDirectory(int processId)
     {
@@ -142,23 +144,54 @@ public static class ProcessExtension
             {
                 var peb32 = new IntPtr();
 
-                var hr = NtQueryInformationProcess(handle, (int)PROCESSINFOCLASS.ProcessWow64Information, ref peb32, IntPtr.Size, IntPtr.Zero);
-                if (hr != 0) throw new Win32Exception(hr);
+                var hr = NtQueryInformationProcess(
+                    handle,
+                    (int)PROCESSINFOCLASS.ProcessWow64Information,
+                    ref peb32,
+                    IntPtr.Size,
+                    IntPtr.Zero
+                );
+                if (hr != 0)
+                    throw new Win32Exception(hr);
                 pebAddress = peb32.ToInt64();
 
                 var pp = new IntPtr();
-                if (!ReadProcessMemory(handle, new IntPtr(pebAddress + processParametersOffset), ref pp, new IntPtr(Marshal.SizeOf(pp)), IntPtr.Zero))
+                if (
+                    !ReadProcessMemory(
+                        handle,
+                        new IntPtr(pebAddress + processParametersOffset),
+                        ref pp,
+                        new IntPtr(Marshal.SizeOf(pp)),
+                        IntPtr.Zero
+                    )
+                )
                     throw new Win32Exception(Marshal.GetLastWin32Error());
 
                 var us = new UNICODE_STRING_32();
-                if (!ReadProcessMemory(handle, new IntPtr(pp.ToInt64() + offset), ref us, new IntPtr(Marshal.SizeOf(us)), IntPtr.Zero))
+                if (
+                    !ReadProcessMemory(
+                        handle,
+                        new IntPtr(pp.ToInt64() + offset),
+                        ref us,
+                        new IntPtr(Marshal.SizeOf(us)),
+                        IntPtr.Zero
+                    )
+                )
                     throw new Win32Exception(Marshal.GetLastWin32Error());
 
                 if (us.Buffer == 0 || us.Length == 0)
                     return null;
 
                 var s = new string('\0', us.Length / 2);
-                if (!ReadProcessMemory(handle, new IntPtr(us.Buffer), s, new IntPtr(us.Length), IntPtr.Zero))
+                if (
+                    !ReadProcessMemory(
+                        handle,
+                        new IntPtr(us.Buffer),
+                        s,
+                        new IntPtr(us.Length),
+                        IntPtr.Zero
+                    )
+                )
                     throw new Win32Exception(Marshal.GetLastWin32Error());
 
                 return s;
@@ -166,17 +199,36 @@ public static class ProcessExtension
             else if (IsWow64Process) //Os : 64Bit, Cur 32, Tar 64
             {
                 var pbi = new PROCESS_BASIC_INFORMATION_WOW64();
-                var hr = NtWow64QueryInformationProcess64(handle, (int)PROCESSINFOCLASS.ProcessBasicInformation, ref pbi, Marshal.SizeOf(pbi), IntPtr.Zero);
-                if (hr != 0) throw new Win32Exception(hr);
+                var hr = NtWow64QueryInformationProcess64(
+                    handle,
+                    (int)PROCESSINFOCLASS.ProcessBasicInformation,
+                    ref pbi,
+                    Marshal.SizeOf(pbi),
+                    IntPtr.Zero
+                );
+                if (hr != 0)
+                    throw new Win32Exception(hr);
                 pebAddress = pbi.PebBaseAddress;
 
                 long pp = 0;
-                hr = NtWow64ReadVirtualMemory64(handle, pebAddress + processParametersOffset, ref pp, Marshal.SizeOf(pp), IntPtr.Zero);
+                hr = NtWow64ReadVirtualMemory64(
+                    handle,
+                    pebAddress + processParametersOffset,
+                    ref pp,
+                    Marshal.SizeOf(pp),
+                    IntPtr.Zero
+                );
                 if (hr != 0)
                     throw new Win32Exception(hr);
 
                 var us = new UNICODE_STRING_WOW64();
-                hr = NtWow64ReadVirtualMemory64(handle, pp + offset, ref us, Marshal.SizeOf(us), IntPtr.Zero);
+                hr = NtWow64ReadVirtualMemory64(
+                    handle,
+                    pp + offset,
+                    ref us,
+                    Marshal.SizeOf(us),
+                    IntPtr.Zero
+                );
                 if (hr != 0)
                     throw new Win32Exception(hr);
 
@@ -193,16 +245,39 @@ public static class ProcessExtension
             else // Os,Cur,Tar : 64 or 32
             {
                 var pbi = new PROCESS_BASIC_INFORMATION();
-                var hr = NtQueryInformationProcess(handle, (int)PROCESSINFOCLASS.ProcessBasicInformation, ref pbi, Marshal.SizeOf(pbi), IntPtr.Zero);
-                if (hr != 0) throw new Win32Exception(hr);
+                var hr = NtQueryInformationProcess(
+                    handle,
+                    (int)PROCESSINFOCLASS.ProcessBasicInformation,
+                    ref pbi,
+                    Marshal.SizeOf(pbi),
+                    IntPtr.Zero
+                );
+                if (hr != 0)
+                    throw new Win32Exception(hr);
                 pebAddress = pbi.PebBaseAddress.ToInt64();
 
                 var pp = new IntPtr();
-                if (!ReadProcessMemory(handle, new IntPtr(pebAddress + processParametersOffset), ref pp, new IntPtr(Marshal.SizeOf(pp)), IntPtr.Zero))
+                if (
+                    !ReadProcessMemory(
+                        handle,
+                        new IntPtr(pebAddress + processParametersOffset),
+                        ref pp,
+                        new IntPtr(Marshal.SizeOf(pp)),
+                        IntPtr.Zero
+                    )
+                )
                     throw new Win32Exception(Marshal.GetLastWin32Error());
 
                 var us = new UNICODE_STRING();
-                if (!ReadProcessMemory(handle, pp + (int)offset, ref us, new IntPtr(Marshal.SizeOf(us)), IntPtr.Zero))
+                if (
+                    !ReadProcessMemory(
+                        handle,
+                        pp + (int)offset,
+                        ref us,
+                        new IntPtr(Marshal.SizeOf(us)),
+                        IntPtr.Zero
+                    )
+                )
                     throw new Win32Exception(Marshal.GetLastWin32Error());
 
                 if (us.Buffer == IntPtr.Zero || us.Length == 0)
@@ -273,43 +348,107 @@ public static class ProcessExtension
     }
 
     [DllImport("ntdll.dll")]
-    private static extern int NtQueryInformationProcess(IntPtr ProcessHandle, int ProcessInformationClass, ref PROCESS_BASIC_INFORMATION ProcessInformation, int ProcessInformationLength, IntPtr ReturnLength);
+    private static extern int NtQueryInformationProcess(
+        IntPtr ProcessHandle,
+        int ProcessInformationClass,
+        ref PROCESS_BASIC_INFORMATION ProcessInformation,
+        int ProcessInformationLength,
+        IntPtr ReturnLength
+    );
 
     //ProcessWow64Information, // q: ULONG_PTR
     [DllImport("ntdll.dll")]
-    private static extern int NtQueryInformationProcess(IntPtr ProcessHandle, int ProcessInformationClass, ref IntPtr ProcessInformation, int ProcessInformationLength, IntPtr ReturnLength);
+    private static extern int NtQueryInformationProcess(
+        IntPtr ProcessHandle,
+        int ProcessInformationClass,
+        ref IntPtr ProcessInformation,
+        int ProcessInformationLength,
+        IntPtr ReturnLength
+    );
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, ref IntPtr lpBuffer, IntPtr dwSize, IntPtr lpNumberOfBytesRead);
+    private static extern bool ReadProcessMemory(
+        IntPtr hProcess,
+        IntPtr lpBaseAddress,
+        ref IntPtr lpBuffer,
+        IntPtr dwSize,
+        IntPtr lpNumberOfBytesRead
+    );
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, ref UNICODE_STRING lpBuffer, IntPtr dwSize, IntPtr lpNumberOfBytesRead);
+    private static extern bool ReadProcessMemory(
+        IntPtr hProcess,
+        IntPtr lpBaseAddress,
+        ref UNICODE_STRING lpBuffer,
+        IntPtr dwSize,
+        IntPtr lpNumberOfBytesRead
+    );
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, ref UNICODE_STRING_32 lpBuffer, IntPtr dwSize, IntPtr lpNumberOfBytesRead);
+    private static extern bool ReadProcessMemory(
+        IntPtr hProcess,
+        IntPtr lpBaseAddress,
+        ref UNICODE_STRING_32 lpBuffer,
+        IntPtr dwSize,
+        IntPtr lpNumberOfBytesRead
+    );
 
     //[DllImport("kernel32.dll", SetLastError = true)]
     //private static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, ref UNICODE_STRING_WOW64 lpBuffer, IntPtr dwSize, IntPtr lpNumberOfBytesRead);
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, [MarshalAs(UnmanagedType.LPWStr)] string lpBuffer, IntPtr dwSize, IntPtr lpNumberOfBytesRead);
+    private static extern bool ReadProcessMemory(
+        IntPtr hProcess,
+        IntPtr lpBaseAddress,
+        [MarshalAs(UnmanagedType.LPWStr)] string lpBuffer,
+        IntPtr dwSize,
+        IntPtr lpNumberOfBytesRead
+    );
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr OpenProcess(int dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+    private static extern IntPtr OpenProcess(
+        int dwDesiredAccess,
+        bool bInheritHandle,
+        int dwProcessId
+    );
 
     [DllImport("kernel32.dll")]
     private static extern bool CloseHandle(IntPtr hObject);
 
     // for 32-bit process in a 64-bit OS only
     [DllImport("ntdll.dll")]
-    private static extern int NtWow64QueryInformationProcess64(IntPtr ProcessHandle, int ProcessInformationClass, ref PROCESS_BASIC_INFORMATION_WOW64 ProcessInformation, int ProcessInformationLength, IntPtr ReturnLength);
+    private static extern int NtWow64QueryInformationProcess64(
+        IntPtr ProcessHandle,
+        int ProcessInformationClass,
+        ref PROCESS_BASIC_INFORMATION_WOW64 ProcessInformation,
+        int ProcessInformationLength,
+        IntPtr ReturnLength
+    );
 
     [DllImport("ntdll.dll")]
-    private static extern int NtWow64ReadVirtualMemory64(IntPtr hProcess, long lpBaseAddress, ref long lpBuffer, long dwSize, IntPtr lpNumberOfBytesRead);
+    private static extern int NtWow64ReadVirtualMemory64(
+        IntPtr hProcess,
+        long lpBaseAddress,
+        ref long lpBuffer,
+        long dwSize,
+        IntPtr lpNumberOfBytesRead
+    );
 
     [DllImport("ntdll.dll")]
-    private static extern int NtWow64ReadVirtualMemory64(IntPtr hProcess, long lpBaseAddress, ref UNICODE_STRING_WOW64 lpBuffer, long dwSize, IntPtr lpNumberOfBytesRead);
+    private static extern int NtWow64ReadVirtualMemory64(
+        IntPtr hProcess,
+        long lpBaseAddress,
+        ref UNICODE_STRING_WOW64 lpBuffer,
+        long dwSize,
+        IntPtr lpNumberOfBytesRead
+    );
 
     [DllImport("ntdll.dll")]
-    private static extern int NtWow64ReadVirtualMemory64(IntPtr hProcess, long lpBaseAddress, [MarshalAs(UnmanagedType.LPWStr)] string lpBuffer, long dwSize, IntPtr lpNumberOfBytesRead);
+    private static extern int NtWow64ReadVirtualMemory64(
+        IntPtr hProcess,
+        long lpBaseAddress,
+        [MarshalAs(UnmanagedType.LPWStr)] string lpBuffer,
+        long dwSize,
+        IntPtr lpNumberOfBytesRead
+    );
 }
