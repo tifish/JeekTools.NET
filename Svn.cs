@@ -27,7 +27,7 @@ public static class Svn
             // Windows 命令行参数长度限制为 8191，所以超过 8000 时，使用文件列表参数。
             if (forceJoin || paths.Sum(path => path.Length) < 8000)
             {
-                Argument = string.Join(" ", paths.Select(path => $"\"{path}\""));
+                Argument = string.Join(" ", paths.Select(NormalizePathArgument));
             }
             else
             {
@@ -447,12 +447,25 @@ public static class Svn
         return AsyncHelper.RunSync(() => GetInfo(path));
     }
 
+    private static string NormalizePathArgument(string path)
+    {
+        // For root path like D:\, svn report error with double quotes.
+        // So we need to normalize the path.
+        if (path.EndsWith('\\'))
+            return $"""
+                "{path}\"
+                """;
+        return $"""
+            "{path}"
+            """;
+    }
+
     public static async Task<SvnInfo?> GetInfo(string path)
     {
         var svnInfo = new SvnInfo();
 
         var runResult = await RunWithProcessOutput(
-            $"info \"{path}\"",
+            $"info {NormalizePathArgument(path)}",
             "",
             line =>
             {
@@ -675,7 +688,7 @@ public static class Svn
     {
         var result = -1;
         await RunWithProcessOutput(
-            $"info --show-item last-changed-revision {path}",
+            $"info --show-item last-changed-revision {NormalizePathArgument(path)}",
             "",
             line =>
             {
@@ -696,7 +709,7 @@ public static class Svn
     {
         var result = -1;
         await RunWithProcessOutput(
-            $"info -r HEAD --show-item last-changed-revision {path}",
+            $"info -r HEAD --show-item last-changed-revision {NormalizePathArgument(path)}",
             "",
             line =>
             {
