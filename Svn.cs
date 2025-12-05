@@ -148,9 +148,9 @@ public static class Svn
             return false;
         }
 
-        while (!proc.StandardOutput.EndOfStream)
+        string? line;
+        while ((line = await proc.StandardOutput.ReadLineAsync()) != null)
         {
-            var line = await proc.StandardOutput.ReadLineAsync();
             if (!outputLineProcessor(line ?? ""))
                 break;
         }
