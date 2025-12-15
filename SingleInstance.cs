@@ -8,9 +8,7 @@ public class SingleInstance : IDisposable
     private Mutex? _mutex;
     private readonly string _mutexName;
     private readonly string _pipeName;
-    private const string ShowWindowMessage = "SHOW_WINDOW";
 
-    private NamedPipeServerStream? _pipeServer;
     private CancellationTokenSource? _cancellationTokenSource;
 
     public SingleInstance(string uniqueName)
@@ -24,7 +22,6 @@ public class SingleInstance : IDisposable
         if (!isNew)
         {
             // Another instance is already running, send message to show window
-            SendShowWindowMessage();
             _mutex.Dispose();
             _mutex = null;
             IsRunning = true;
@@ -33,14 +30,14 @@ public class SingleInstance : IDisposable
 
     public bool IsRunning { get; private set; } = false;
 
-    private void SendShowWindowMessage()
+    public void SendMessage(string message)
     {
         try
         {
             using var pipeClient = new NamedPipeClientStream(".", _pipeName, PipeDirection.Out);
             pipeClient.Connect(1000); // Wait up to 1 second
             using var writer = new StreamWriter(pipeClient);
-            writer.WriteLine(ShowWindowMessage);
+            writer.WriteLine(message);
             writer.Flush();
         }
         catch (Exception ex)
@@ -50,45 +47,45 @@ public class SingleInstance : IDisposable
         }
     }
 
-    public void StartIPCServer(Action showWindowCallback)
+    public void StartIPCServer(Action<string>? onMessage)
     {
         _cancellationTokenSource = new CancellationTokenSource();
 
         Task.Run(
             async () =>
             {
-                while (!_cancellationTokenSource.Token.IsCancellationRequested)
+                try
                 {
-                    try
+                    using var server = new NamedPipeServerStream(_pipeName, PipeDirection.In);
+
+                    while (!_cancellationTokenSource.Token.IsCancellationRequested)
                     {
-                        _pipeServer = new NamedPipeServerStream(_pipeName, PipeDirection.In);
-                        await _pipeServer.WaitForConnectionAsync(_cancellationTokenSource.Token);
+                        await server.WaitForConnectionAsync(_cancellationTokenSource.Token);
 
-                        using var reader = new StreamReader(_pipeServer);
-                        var message = await reader.ReadLineAsync();
-
-                        if (message == ShowWindowMessage)
+                        try
                         {
-                            showWindowCallback?.Invoke();
-                        }
+                            using var reader = new StreamReader(server, leaveOpen: true);
 
-                        _pipeServer.Disconnect();
+                            while (server.IsConnected)
+                            {
+                                var message = await reader.ReadLineAsync();
+                                if (message == null)
+                                    break;
+
+                                onMessage?.Invoke(message);
+                            }
+                        }
+                        catch (Exception) { }
+                        server.Disconnect();
                     }
-                    catch (OperationCanceledException)
-                    {
-                        // Expected when cancellation is requested
-                        break;
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"IPC Server error: {ex.Message}");
-                        await Task.Delay(1000, _cancellationTokenSource.Token); // Wait before retrying
-                    }
-                    finally
-                    {
-                        _pipeServer?.Dispose();
-                        _pipeServer = null;
-                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected when cancellation is requested
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"IPC Server error: {ex.Message}");
                 }
             },
             _cancellationTokenSource.Token
@@ -98,7 +95,6 @@ public class SingleInstance : IDisposable
     public void Dispose()
     {
         _cancellationTokenSource?.Cancel();
-        _pipeServer?.Dispose();
         _mutex?.ReleaseMutex();
         _mutex?.Dispose();
 
