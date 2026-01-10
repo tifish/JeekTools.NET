@@ -19,6 +19,7 @@ public class JsonFile<T>
         WriteIndented = true,
         IgnoreReadOnlyProperties = true,
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        NewLine = "\n",
     };
 
     public async Task<T?> Load()
