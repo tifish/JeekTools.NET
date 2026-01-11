@@ -115,4 +115,15 @@ public class GitRepository
     {
         return await RunGitCommand("push");
     }
+
+    public async Task<string> GetRemoteUrl()
+    {
+        var result = await RunGitCommand("remote get-url origin");
+        return result ? LastOutput.Trim() : "";
+    }
+
+    public string GetRemoteUrlSync()
+    {
+        return AsyncHelper.RunSync(() => GetRemoteUrl());
+    }
 }

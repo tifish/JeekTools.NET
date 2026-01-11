@@ -5,6 +5,26 @@ namespace JeekTools;
 
 public static class PlasticScm
 {
+    public static async Task<string> GetRepoUrl(string workingDirectory)
+    {
+        var output = await Run("showselector", workingDirectory);
+        // Selector for workspace Jx3mHelperTray:
+        // repository "Jx3mHelperTray@localhost:8087"
+        //   path "/"
+        //     smartbranch "/main"
+        var lines = output.Split(Environment.NewLine);
+        if (lines.Length < 2)
+            return "";
+        if (lines[1].StartsWith("repository "))
+            return lines[1].Split(' ')[1].Trim('"');
+        return "";
+    }
+
+    public static string GetRepoUrlSync(string workingDirectory)
+    {
+        return AsyncHelper.RunSync(() => GetRepoUrl(workingDirectory));
+    }
+
     public static async Task<string> Run(string arguments, string workingDirectory)
     {
         var process = Process.Start(
