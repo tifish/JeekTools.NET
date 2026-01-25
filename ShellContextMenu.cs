@@ -1,4 +1,6 @@
-﻿namespace JeekTools;
+﻿using DotNetRun;
+
+namespace JeekTools;
 
 public static class ShellContextMenu
 {
@@ -12,10 +14,10 @@ public static class ShellContextMenu
         var key = $@"{UserClasses}\{DirShell}\{keyName}";
         var bgKey = $@"{UserClasses}\{DirBgShell}\{keyName}";
 
-        RegistryHelper.SetValue(key, null, hint);
-        RegistryHelper.SetValue($@"{key}\command", null, command);
-        RegistryHelper.SetValue(bgKey, null, hint);
-        RegistryHelper.SetValue($@"{bgKey}\command", null, command.Replace("%1", "%V"));
+        Reg.SetValue(key, null, hint);
+        Reg.SetValue($@"{key}\command", null, command);
+        Reg.SetValue(bgKey, null, hint);
+        Reg.SetValue($@"{bgKey}\command", null, command.Replace("%1", "%V"));
     }
 
     public static void UnregisterDirectory(params string[] keyNames)
@@ -30,6 +32,6 @@ public static class ShellContextMenu
             }
         )
         foreach (var subKeyName in keyNames)
-            RegistryHelper.DeleteKey($@"{parentKeyPath}\{subKeyName}");
+            Reg.DeleteKey($@"{parentKeyPath}\{subKeyName}");
     }
 }
