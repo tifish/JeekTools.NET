@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Utf8StringInterpolation;
 using ZLogger;
@@ -14,6 +15,7 @@ namespace JeekTools;
 public static class LogManager
 {
     private static ILoggerFactory? _factory;
+    private static readonly object AliasUpdateLock = new();
 
     public static ILogger CreateLogger<T>()
     {
@@ -62,6 +64,8 @@ public static class LogManager
                     AppDomain.CurrentDomain.SetupInformation.ApplicationBase ?? string.Empty,
                     LogsDirectory
                 );
+                Directory.CreateDirectory(logsDir);
+                var currentAliasPath = Path.Join(logsDir, $"{appName}.log");
 
                 // For each file in logsDir, if the file time is older than Now - RetainFileLimit, delete it.
                 if (Directory.Exists(logsDir))
@@ -86,11 +90,17 @@ public static class LogManager
                 {
                     options.FilePathSelector = (timestamp, sequenceNumber) =>
                     {
-                        CurrentLogFile = Path.Join(
+                        var rollingPath = Path.Join(
                             logsDir,
                             $"{appName}_{timestamp.ToLocalTime():yyyy-MM-dd_HH-mm-ss}_{sequenceNumber}.log"
                         );
-                        return CurrentLogFile;
+                        CurrentRollingLogFile = rollingPath;
+                        CurrentLogFile = currentAliasPath; // stable name for "current log"
+
+                        // Best-effort: create/update alias to current rolling file (hardlink only).
+                        TryUpdateCurrentLogAlias(currentAliasPath, rollingPath);
+
+                        return rollingPath;
                     };
                     options.RollingInterval = RollingInterval;
                     options.RollingSizeKB = RollingSizeKB;
@@ -128,5 +138,63 @@ public static class LogManager
         });
     }
 
+    /// <summary>
+    /// A stable file path without timestamp suffix, e.g. Logs/AppName.log.
+    /// It points to the current rolling log file (via symlink/hardlink best-effort).
+    /// </summary>
     public static string CurrentLogFile { get; private set; } = "";
+
+    /// <summary>
+    /// The actual rolling log file path with timestamp suffix, e.g. Logs/AppName_yyyy-MM-dd_HH-mm-ss_0.log.
+    /// </summary>
+    public static string CurrentRollingLogFile { get; private set; } = "";
+
+    private static void TryUpdateCurrentLogAlias(string aliasPath, string targetPath)
+    {
+        try
+        {
+            _ = Task.Run(async () =>
+            {
+                // Retry until the rolling file is created by ZLogger.
+                for (var i = 0; i < 50; i++)
+                {
+                    if (File.Exists(targetPath))
+                    {
+                        lock (AliasUpdateLock)
+                        {
+                            TryDeleteFileBestEffort(aliasPath);
+                            if (CreateHardLink(aliasPath, targetPath, IntPtr.Zero))
+                                return;
+                        }
+                    }
+
+                    await Task.Delay(100).ConfigureAwait(false);
+                }
+            });
+        }
+        catch
+        {
+            // Never let alias maintenance break logging.
+        }
+    }
+
+    private static void TryDeleteFileBestEffort(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+            // ignored
+        }
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool CreateHardLink(
+        string lpFileName,
+        string lpExistingFileName,
+        IntPtr lpSecurityAttributes
+    );
 }
