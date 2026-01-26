@@ -613,7 +613,8 @@ public static class Svn
                     target.Element("entry")?.Element("repos-status")?.Attribute("item")?.Value
                     == "modified"
                 )
-                .ToArray() ?? new bool[paths.Length];
+                .ToArray()
+            ?? new bool[paths.Length];
     }
 
     public static async Task<bool> HasUpdate(string path, string workingDirectory)
