@@ -35,9 +35,14 @@ public static class Executor
                 string.IsNullOrEmpty(processStartInfo.WorkingDirectory)
                 && File.Exists(processStartInfo.FileName)
             )
+            {
                 processStartInfo.WorkingDirectory = Path.GetDirectoryName(
                     processStartInfo.FileName
                 );
+                // Should use relative path to working directory
+                processStartInfo.FileName = Path.GetFileName(processStartInfo.FileName);
+            }
+
             return Process.Start(processStartInfo);
         }
         catch (Exception ex)
