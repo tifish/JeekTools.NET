@@ -40,7 +40,10 @@ public static class Executor
                     processStartInfo.FileName
                 );
                 // Should use relative path to working directory
-                processStartInfo.FileName = Path.GetFileName(processStartInfo.FileName);
+                // But CreateProcess (UseShellExecute=false) does NOT search WorkingDirectory
+                // for the executable, so we must keep the full path in that case.
+                if (processStartInfo.UseShellExecute)
+                    processStartInfo.FileName = Path.GetFileName(processStartInfo.FileName);
             }
 
             return Process.Start(processStartInfo);
