@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Headers;
 
 namespace JeekTools;
@@ -132,6 +133,12 @@ public static class HttpHelper
         var buffer = new byte[8 * 1024 * 1024]; // 8MB
         long totalRead = 0;
         int read;
+
+        // Throttle progress callbacks to avoid flooding UI: report only when
+        // percent advanced by >= 1% or >= 200ms has elapsed since the last report.
+        double lastReportedPercent = -1.0;
+        var reportStopwatch = Stopwatch.StartNew();
+
         using (var contentStream = await getResponse.Content.ReadAsStreamAsync())
         using (
             var fileStream = new FileStream(
@@ -149,12 +156,26 @@ public static class HttpHelper
             {
                 await fileStream.WriteAsync(buffer.AsMemory(0, read));
                 totalRead += read;
-                if (canReportProgress && totalBytes > 0)
+                if (canReportProgress && totalBytes > 0 && progressCallback != null)
                 {
                     double progress = (double)totalRead / totalBytes * 100;
-                    progressCallback?.Invoke(progress);
+                    if (
+                        progress - lastReportedPercent >= 1.0
+                        || reportStopwatch.ElapsedMilliseconds >= 200
+                    )
+                    {
+                        lastReportedPercent = progress;
+                        reportStopwatch.Restart();
+                        progressCallback.Invoke(progress);
+                    }
                 }
             }
+        }
+
+        // Ensure a final 100% callback so the UI settles on completion.
+        if (canReportProgress && totalBytes > 0 && progressCallback != null)
+        {
+            progressCallback.Invoke(100.0);
         }
 
         return filePath;
