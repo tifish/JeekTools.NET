@@ -129,6 +129,16 @@ public static class LogManager
         });
     }
 
+    /// <summary>
+    ///     释放日志工厂，把异步缓冲的日志刷进文件。
+    ///     短生命周期的命令进程退出前必须调用，否则日志会丢失。
+    /// </summary>
+    public static void Shutdown()
+    {
+        _factory?.Dispose();
+        _factory = null;
+    }
+
     public static void DisableLogging()
     {
         _factory?.Dispose();
