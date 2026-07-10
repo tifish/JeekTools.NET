@@ -39,11 +39,16 @@ public static class PlasticScm
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 StandardOutputEncoding = Encoding.UTF8,
+                RedirectStandardInput = true,
             }
         );
 
         if (process == null)
             return "";
+
+        // cm.exe 未配置时会交互式提问，窗口又是隐藏的，会导致读取输出永久挂起。
+        // 关闭 stdin 让交互式读取直接得到 EOF。
+        process.StandardInput.Close();
 
         await process.StandardOutput.ReadLineAsync(); // skip chcp output
         return await process.StandardOutput.ReadToEndAsync();
@@ -68,11 +73,15 @@ public static class PlasticScm
                 StandardOutputEncoding = Encoding.UTF8,
                 RedirectStandardError = true,
                 StandardErrorEncoding = Encoding.UTF8,
+                RedirectStandardInput = true,
             }
         );
 
         if (process == null)
             return ("", "");
+
+        // 同 Run()：关闭 stdin，避免 cm.exe 交互式提问导致永久挂起。
+        process.StandardInput.Close();
 
         await process.StandardOutput.ReadLineAsync(); // skip chcp output
         return (
