@@ -86,17 +86,30 @@ public static class Disk
     /// <returns>Returns true if it's an SSD, otherwise false</returns>
     public static bool IsSSD(string driveLetter, bool defaultWhenError)
     {
+        return TryIsSSD(driveLetter, out var isSsd) ? isSsd : defaultWhenError;
+    }
+
+    /// <summary>
+    /// 尝试检测指定逻辑盘是否为 SSD。
+    /// </summary>
+    /// <remarks>
+    /// 返回 false 表示无法检测磁盘类型，调用方不应把这种情况直接当成机械硬盘。
+    /// </remarks>
+    public static bool TryIsSSD(string driveLetter, out bool isSsd)
+    {
         if (driveLetter.Length == 0)
             throw new ArgumentException("Drive letter cannot be empty");
 
         try
         {
             int diskNumber = GetDiskNumber(driveLetter[0]);
-            return CheckDiskSSD(diskNumber);
+            isSsd = CheckDiskSSD(diskNumber);
+            return true;
         }
         catch
         {
-            return defaultWhenError;
+            isSsd = false;
+            return false;
         }
     }
 

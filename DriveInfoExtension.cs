@@ -6,4 +6,9 @@ public static class DriveInfoExtension
     {
         return Disk.IsSSD(driveInfo.Name, defaultWhenError);
     }
+
+    public static bool TryIsSSD(this DriveInfo driveInfo, out bool isSsd)
+    {
+        return Disk.TryIsSSD(driveInfo.Name, out isSsd);
+    }
 }
