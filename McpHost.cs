@@ -7,7 +7,7 @@ using ZLogger;
 
 namespace JeekTools;
 
-public sealed class DebugMcpHostOptions
+public sealed class McpHostOptions
 {
     /// <summary>MCP serverInfo.name, e.g. "myapp-debug".</summary>
     public required string ServerName { get; init; }
@@ -21,11 +21,22 @@ public sealed class DebugMcpHostOptions
     /// <summary>serverInfo.version, e.g. the build number.</summary>
     public Func<string> GetVersion { get; init; } = () => "0";
 
-    /// <summary>Only when true does <see cref="DebugMcpHost.Start"/> listen
-    /// (gate on Debug builds).</summary>
+    /// <summary>Only when true does <see cref="McpHost.Start"/> listen (a debug-only
+    /// surface gates this on Debug builds; a product surface leaves it true).</summary>
     public bool Enabled { get; init; } = true;
 
-    /// <summary>First port to try; scans upward when taken.</summary>
+    /// <summary>
+    /// Named pipe to accept MCP sessions on. Preferred over HTTP: no port to allocate, so
+    /// the name is stable across runs, and the ACL — not a URL token — limits access.
+    /// Null disables the pipe transport.
+    /// </summary>
+    public string? PipeName { get; init; }
+
+    /// <summary>Concurrent pipe sessions (one per connected client).</summary>
+    public int MaxPipeSessions { get; init; } = 8;
+
+    /// <summary>First port to try; scans upward when taken. Zero or less disables HTTP
+    /// entirely, leaving the pipe as the only transport.</summary>
     public int DefaultPort { get; init; } = 8737;
 
     /// <summary>How many consecutive ports to scan.</summary>
@@ -56,31 +67,38 @@ public sealed class DebugMcpHostOptions
 }
 
 /// <summary>
-/// Debug MCP (Model Context Protocol) server over loopback HTTP so an AI agent
-/// can inspect and drive the running app: standard tools read/write properties
-/// by object path, execute commands and methods on the UI thread, list members,
-/// and tail the LogManager log; apps register extra tools with
-/// <see cref="AddTool"/>. Binding is loopback-only with Origin validation
-/// (DNS-rebinding protection), and the port is reserved via a global mutex so
-/// parallel instances scan to free ports.
+/// In-process MCP (Model Context Protocol) server so an AI agent can inspect and drive the
+/// running app: standard tools read/write properties by object path, execute commands and
+/// methods on the UI thread, list members, and tail the LogManager log; apps register extra
+/// tools with <see cref="AddTool"/>.
+///
+/// Two transports, either or both: a named pipe (preferred — nothing to allocate, so the
+/// name is stable and clients can hard-code it, and the ACL replaces a URL secret), and
+/// loopback HTTP (Origin-validated against DNS rebinding, with the port reserved through a
+/// global mutex so parallel instances scan to free ports). Set
+/// <see cref="McpHostOptions.DefaultPort"/> to 0 for a pipe-only host.
 /// </summary>
-public sealed class DebugMcpHost
+public sealed class McpHost
 {
     public const string SupportedProtocolVersion = "2025-06-18";
     public static readonly string[] KnownProtocolVersions = ["2024-11-05", "2025-03-26", SupportedProtocolVersion];
 
-    private static readonly ILogger Log = LogManager.CreateLogger(nameof(DebugMcpHost));
+    private static readonly ILogger Log = LogManager.CreateLogger(nameof(McpHost));
     private static readonly JsonSerializerOptions PrettyOptions = new() { WriteIndented = true };
 
-    private readonly DebugMcpHostOptions _options;
+    private readonly McpHostOptions _options;
     private readonly Dictionary<string, Func<JsonObject, Task<JsonObject>>> _tools = [];
     private HttpListener? _listener;
     private Mutex? _portReservation;
+    private McpPipeServer? _pipeServer;
 
     /// <summary>Endpoint URL while listening, "" otherwise.</summary>
     public string Url { get; private set; } = "";
 
-    public DebugMcpHost(DebugMcpHostOptions options)
+    /// <summary>Named pipe accepting sessions, "" when the pipe transport is off.</summary>
+    public string PipeName { get; private set; } = "";
+
+    public McpHost(McpHostOptions options)
     {
         _options = options;
         AddTool("describe", DescribeAsync);
@@ -97,7 +115,13 @@ public sealed class DebugMcpHost
 
     public void Start()
     {
-        if (!_options.Enabled || _listener != null)
+        if (!_options.Enabled)
+            return;
+
+        StartPipe();
+
+        // Pipe-only host (product surface): nothing else to bind.
+        if (_options.DefaultPort <= 0 || _listener != null)
             return;
 
         var envPort = 0;
@@ -144,7 +168,7 @@ public sealed class DebugMcpHost
                 Url = $"http://{host}:{port}/mcp";
                 _options.UrlChanged?.Invoke(Url);
                 _ = Task.Run(() => ListenLoopAsync(listener));
-                Log.ZLogInformation($"Debug MCP server listening on {Url}");
+                Log.ZLogInformation($"{_options.ServerName} listening on {Url}");
                 return;
             }
 
@@ -156,13 +180,29 @@ public sealed class DebugMcpHost
         }
 
         if (hasExplicitPort)
-            Log.ZLogError(lastError, $"Debug MCP server could not start on explicit port {envPort}");
+            Log.ZLogError(lastError, $"{_options.ServerName} could not start on explicit port {envPort}");
         else
-            Log.ZLogError(lastError, $"Debug MCP server could not start on ports {_options.DefaultPort}-{_options.DefaultPort + _options.PortScanCount - 1}");
+            Log.ZLogError(lastError, $"{_options.ServerName} could not start on ports {_options.DefaultPort}-{_options.DefaultPort + _options.PortScanCount - 1}");
+    }
+
+    private void StartPipe()
+    {
+        if (_pipeServer is not null || _options.PipeName is not { Length: > 0 } name)
+            return;
+
+        var server = new McpPipeServer(name, _options.MaxPipeSessions, DispatchAsync);
+        _pipeServer = server;
+        PipeName = name;
+        server.Start();
     }
 
     public void Stop()
     {
+        var pipeServer = _pipeServer;
+        _pipeServer = null;
+        PipeName = "";
+        pipeServer?.Stop();
+
         try
         {
             _listener?.Stop();
@@ -306,7 +346,7 @@ public sealed class DebugMcpHost
         }
         catch (Exception ex)
         {
-            Log.ZLogError(ex, $"Debug MCP request failed");
+            Log.ZLogError(ex, $"{_options.ServerName} request failed");
             try
             {
                 response.StatusCode = 500;
@@ -335,6 +375,15 @@ public sealed class DebugMcpHost
             return false;
         return uri.IsLoopback;
     }
+
+    /// <summary>Transport-agnostic entry point: one parsed JSON-RPC message in, its reply
+    /// (or null for notifications) out. Shared by the HTTP listener and the pipe server.</summary>
+    private Task<JsonNode?> DispatchAsync(JsonNode message) => message switch
+    {
+        JsonObject single => HandleMessageAsync(single),
+        JsonArray batch => HandleBatchAsync(batch),
+        _ => Task.FromResult<JsonNode?>(RpcError(null, -32600, "Invalid request")),
+    };
 
     private async Task<JsonNode?> HandleBatchAsync(JsonArray batch)
     {
@@ -380,7 +429,7 @@ public sealed class DebugMcpHost
         }
         catch (Exception ex)
         {
-            Log.ZLogError(ex, $"Debug MCP method {method} failed");
+            Log.ZLogError(ex, $"{_options.ServerName} method {method} failed");
             return isRequest ? RpcError(id, -32603, ex.Message) : null;
         }
     }
