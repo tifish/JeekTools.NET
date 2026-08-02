@@ -44,12 +44,12 @@ public sealed class AutoUpdaterOptions
     public bool Disabled { get; init; }
 
     /// <summary>
-    /// Root directory for the staged update package and sidecar version file.
+    /// Root directory for a downloaded update (<c>package\</c>, local <c>version.txt</c>, zip).
     /// Defaults to <c>%LOCALAPPDATA%\&lt;AppName&gt;\Update</c> (not the system temp folder)
     /// so a postponed install survives reboots and temp cleanups.
     /// Point parallel debug instances at isolated roots so they never fight over files.
     /// </summary>
-    public string? StageRoot { get; init; }
+    public string? UpdateRoot { get; init; }
 
     /// <summary>Returns the local build number; defaults to the entry assembly's
     /// major version (CI bakes the commit count in as the major version).</summary>
@@ -71,16 +71,15 @@ public sealed class AutoUpdaterOptions
 /// Downloads are routed through the fastest reachable GitHub mirror (see
 /// <see cref="GitHubMirrors"/>) so updates keep working where github.com is blocked.
 ///
-/// A postponed install keeps the package under <see cref="AutoUpdaterOptions.StageRoot"/>
-/// with a <c>staged-version.txt</c> sidecar. The next check reuses it only when the
-/// sidecar matches the current remote <c>version.txt</c>.
+/// A postponed install keeps the package under <see cref="AutoUpdaterOptions.UpdateRoot"/>
+/// with a local copy of <c>version.txt</c> (same name as the release asset). The next
+/// check reuses the package only when that file matches the current remote version.
 /// </summary>
 public sealed class AutoUpdater
 {
     private static readonly ILogger Log = LogManager.CreateLogger(nameof(AutoUpdater));
 
     private const string PackageFolderName = "package";
-    private const string StagedVersionFileName = "staged-version.txt";
 
     private static readonly TimeSpan VersionCheckTimeout = TimeSpan.FromSeconds(5);
 
@@ -108,11 +107,17 @@ public sealed class AutoUpdater
     public int RemoteVersion { get; private set; }
     public string FailureReason { get; private set; } = "";
 
-    /// <summary>Directory that holds <c>package\</c> and <c>staged-version.txt</c>.</summary>
-    public string StageRoot => ResolveStageRoot();
+    /// <summary>Directory that holds <c>package\</c>, local <c>version.txt</c>, and the release zip.</summary>
+    public string UpdateRoot => ResolveUpdateRoot();
 
     /// <summary>Extracted package directory passed to the installer script.</summary>
-    public string PackageDir => Path.Combine(StageRoot, PackageFolderName);
+    public string PackageDir => Path.Combine(UpdateRoot, PackageFolderName);
+
+    /// <summary>Local version file path: same file name as the remote version asset (usually <c>version.txt</c>).</summary>
+    public string StagedVersionPath => Path.Combine(UpdateRoot, Path.GetFileName(_options.VersionTxtUrl));
+
+    /// <summary>Local zip path: same file name as the remote release zip.</summary>
+    public string StagedZipPath => Path.Combine(UpdateRoot, Path.GetFileName(_options.ReleaseZipUrl));
 
     public IReadOnlyList<string> GetDefaultDownloadUrls() => GitHubMirrors.GetMirrors(_options.ReleaseZipUrl);
 
@@ -166,7 +171,7 @@ public sealed class AutoUpdater
             }
 
             // Nothing to install: drop a postponed package for an older/current build.
-            ClearStage();
+            ClearUpdateRoot();
             Log.ZLogInformation($"Already up to date: local={LocalVersion}, remote={RemoteVersion}");
             return UpdateCheckOutcome.UpToDate;
         }
@@ -204,7 +209,7 @@ public sealed class AutoUpdater
 
     /// <summary>
     /// Downloads the update package (trying each mirror in order), extracts it
-    /// to a staging folder, writes <c>staged-version.txt</c>, and verifies the
+    /// to a staging folder, writes local <c>version.txt</c>, and verifies the
     /// package contains the app executable. If a valid stage for the current
     /// <see cref="RemoteVersion"/> already exists, returns it without re-downloading.
     /// Returns the staged package directory, or null with
@@ -235,14 +240,13 @@ public sealed class AutoUpdater
             return null;
         }
 
-        var stageRoot = StageRoot;
-        var zipPath = Path.Combine(stageRoot, $"{_appName}-update.zip");
-        var stageDir = PackageDir;
+        var zipPath = StagedZipPath;
+        var packageDir = PackageDir;
 
         try
         {
-            ClearStage();
-            Directory.CreateDirectory(stageDir);
+            ClearUpdateRoot();
+            Directory.CreateDirectory(packageDir);
 
             var downloaded = false;
             var lastError = "";
@@ -275,36 +279,36 @@ public sealed class AutoUpdater
             {
                 FailureReason = $"download failed from all mirrors: {lastError}";
                 Log.ZLogWarning($"Update download failed: {FailureReason}");
-                ClearStage();
+                ClearUpdateRoot();
                 return null;
             }
 
-            ZipFile.ExtractToDirectory(zipPath, stageDir, overwriteFiles: true);
+            ZipFile.ExtractToDirectory(zipPath, packageDir, overwriteFiles: true);
             TryDelete(() => File.Delete(zipPath));
 
-            if (!File.Exists(Path.Combine(stageDir, _options.AppExeName)))
+            if (!File.Exists(Path.Combine(packageDir, _options.AppExeName)))
             {
                 FailureReason = $"update package is missing {_options.AppExeName}";
                 Log.ZLogWarning($"Update download failed: {FailureReason}");
-                ClearStage();
+                ClearUpdateRoot();
                 return null;
             }
 
             WriteStagedVersion(RemoteVersion);
-            Log.ZLogInformation($"Update staged at {stageDir} (version {RemoteVersion})");
-            return stageDir;
+            Log.ZLogInformation($"Update prepared at {packageDir} (version {RemoteVersion})");
+            return packageDir;
         }
         catch (OperationCanceledException)
         {
             FailureReason = "download cancelled";
-            ClearStage();
+            ClearUpdateRoot();
             return null;
         }
         catch (Exception ex)
         {
             FailureReason = ex.Message;
             Log.ZLogError(ex, $"Failed to download and stage update");
-            ClearStage();
+            ClearUpdateRoot();
             return null;
         }
     }
@@ -458,18 +462,16 @@ public sealed class AutoUpdater
         }
     }
 
-    private string ResolveStageRoot()
+    private string ResolveUpdateRoot()
     {
-        if (!string.IsNullOrWhiteSpace(_options.StageRoot))
-            return Path.GetFullPath(_options.StageRoot);
+        if (!string.IsNullOrWhiteSpace(_options.UpdateRoot))
+            return Path.GetFullPath(_options.UpdateRoot);
 
         return Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             _appName,
             "Update");
     }
-
-    private string StagedVersionPath => Path.Combine(StageRoot, StagedVersionFileName);
 
     private int? TryReadStagedVersion()
     {
@@ -493,18 +495,18 @@ public sealed class AutoUpdater
 
     private void WriteStagedVersion(int version)
     {
-        Directory.CreateDirectory(StageRoot);
+        Directory.CreateDirectory(UpdateRoot);
         File.WriteAllText(StagedVersionPath, version.ToString());
     }
 
-    /// <summary>Best-effort removal of the entire stage root (package + sidecar + zip).</summary>
-    public void ClearStage()
+    /// <summary>Best-effort removal of the entire update root (package + version.txt + zip).</summary>
+    public void ClearUpdateRoot()
     {
-        var stageRoot = StageRoot;
+        var updateRoot = UpdateRoot;
         TryDelete(() =>
         {
-            if (Directory.Exists(stageRoot))
-                Directory.Delete(stageRoot, recursive: true);
+            if (Directory.Exists(updateRoot))
+                Directory.Delete(updateRoot, recursive: true);
         });
     }
 
