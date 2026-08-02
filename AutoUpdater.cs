@@ -68,8 +68,11 @@ public sealed class AutoUpdaterOptions
 /// The build number is the commit count, baked in by CI as the assembly's
 /// major version.
 ///
-/// Downloads are routed through the fastest reachable GitHub mirror (see
-/// <see cref="GitHubMirrors"/>) so updates keep working where github.com is blocked.
+/// Downloads use <see cref="GitHubMirrors"/>: with no prior success, the first
+/// attempt orders mirrors via <see cref="GitHubMirrors.GetFastestMirror"/>; after
+/// a full zip succeeds, that mirror is preferred for later attempts. Fallbacks
+/// abandon a mirror that stalls or stays below a minimum speed. Version checks
+/// race <c>version.txt</c> only for the build number — they do not pick the zip mirror.
 ///
 /// A postponed install keeps the package under <see cref="AutoUpdaterOptions.UpdateRoot"/>
 /// with a local copy of <c>version.txt</c> (same name as the release asset). The next
@@ -92,6 +95,12 @@ public sealed class AutoUpdater
 
     private readonly AutoUpdaterOptions _options;
     private readonly string _appName;
+
+    /// <summary>
+    /// Index into <see cref="GitHubMirrors.GetMirrors"/> of the last zip that
+    /// finished downloading successfully for this updater instance (-1 = none).
+    /// </summary>
+    private int _preferredMirrorIndex = -1;
 
     public AutoUpdater(AutoUpdaterOptions options)
     {
@@ -119,7 +128,7 @@ public sealed class AutoUpdater
     /// <summary>Local zip path: same file name as the remote release zip.</summary>
     public string StagedZipPath => Path.Combine(UpdateRoot, Path.GetFileName(_options.ReleaseZipUrl));
 
-    public IReadOnlyList<string> GetDefaultDownloadUrls() => GitHubMirrors.GetMirrors(_options.ReleaseZipUrl);
+    public IReadOnlyList<string> GetDefaultDownloadUrls() => BuildDownloadUrls();
 
     public int GetLocalVersion()
     {
@@ -138,8 +147,9 @@ public sealed class AutoUpdater
 
     public async Task<UpdateCheckOutcome> HasUpdateAsync()
     {
-        DownloadUrl = _options.ReleaseZipUrl;
-        DownloadUrls = [_options.ReleaseZipUrl];
+        // Download order is independent of version.txt: prefer last successful mirror.
+        DownloadUrls = BuildDownloadUrls();
+        DownloadUrl = DownloadUrls.Count > 0 ? DownloadUrls[0] : _options.ReleaseZipUrl;
         RemoteVersion = 0;
         FailureReason = "";
         LocalVersion = GetLocalVersion();
@@ -149,24 +159,21 @@ public sealed class AutoUpdater
 
         try
         {
-            // Race version.txt mirrors directly. The first successful response
-            // gives us both the remote version and the preferred release mirror,
-            // avoiding a separate probe and a second version.txt request.
-            var versionCheck = await DownloadFirstVersionTextAsync().ConfigureAwait(false);
-            if (versionCheck is null)
+            // Race version.txt only for the build number. Mirror choice for the zip
+            // is decided later (preferred-first + speed-based fallback).
+            var remoteVersion = await DownloadFirstVersionTextAsync().ConfigureAwait(false);
+            if (remoteVersion is null)
                 return Fail("version.txt unavailable or invalid from all mirrors");
 
-            RemoteVersion = versionCheck.RemoteVersion;
-
-            DownloadUrl = versionCheck.DownloadUrl;
-            DownloadUrls = BuildDownloadUrls(DownloadUrl);
+            RemoteVersion = remoteVersion.Value;
 
             if (LocalVersion < _options.MinimumValidLocalVersion)
                 return Fail("local version unavailable (dev build?)");
 
             if (RemoteVersion > LocalVersion)
             {
-                Log.ZLogInformation($"Update available: local={LocalVersion}, remote={RemoteVersion}, url={DownloadUrl}");
+                Log.ZLogInformation(
+                    $"Update available: local={LocalVersion}, remote={RemoteVersion}, prefer={DownloadUrl}");
                 return UpdateCheckOutcome.Available;
             }
 
@@ -230,15 +237,29 @@ public sealed class AutoUpdater
             return null;
         }
 
-        var mirrors = (urls ?? DownloadUrls)
-            .Where(url => !string.IsNullOrWhiteSpace(url))
-            .Distinct()
-            .ToArray();
+        // Prefer last successful mirror; on first download probe throughput instead.
+        // Not derived from the version.txt race.
+        string[] mirrors;
+        if (urls is not null)
+        {
+            mirrors = urls
+                .Where(url => !string.IsNullOrWhiteSpace(url))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+        else
+        {
+            mirrors = await BuildDownloadUrlsForPackageAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         if (mirrors.Length == 0)
         {
             FailureReason = "no download URLs";
             return null;
         }
+
+        DownloadUrls = mirrors;
+        DownloadUrl = mirrors[0];
 
         var zipPath = StagedZipPath;
         var packageDir = PackageDir;
@@ -250,6 +271,7 @@ public sealed class AutoUpdater
 
             var downloaded = false;
             var lastError = "";
+            string? winnerUrl = null;
             for (var i = 0; i < mirrors.Length; i++)
             {
                 TryDelete(() => File.Delete(zipPath));
@@ -262,6 +284,7 @@ public sealed class AutoUpdater
                     await DownloadFileAsync(mirrors[i], zipPath, minimumSpeed, i, mirrors.Length, progress, cancellationToken)
                         .ConfigureAwait(false);
                     downloaded = true;
+                    winnerUrl = mirrors[i];
                     break;
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -275,13 +298,17 @@ public sealed class AutoUpdater
                 }
             }
 
-            if (!downloaded)
+            if (!downloaded || winnerUrl is null)
             {
                 FailureReason = $"download failed from all mirrors: {lastError}";
                 Log.ZLogWarning($"Update download failed: {FailureReason}");
                 ClearUpdateRoot();
                 return null;
             }
+
+            // Next download on this AutoUpdater instance tries this mirror first.
+            RememberPreferredMirror(winnerUrl);
+            DownloadUrl = winnerUrl;
 
             ZipFile.ExtractToDirectory(zipPath, packageDir, overwriteFiles: true);
             TryDelete(() => File.Delete(zipPath));
@@ -295,7 +322,8 @@ public sealed class AutoUpdater
             }
 
             WriteStagedVersion(RemoteVersion);
-            Log.ZLogInformation($"Update prepared at {packageDir} (version {RemoteVersion})");
+            Log.ZLogInformation(
+                $"Update prepared at {packageDir} (version {RemoteVersion}, mirror={winnerUrl})");
             return packageDir;
         }
         catch (OperationCanceledException)
@@ -522,22 +550,86 @@ public sealed class AutoUpdater
         }
     }
 
-    private string[] BuildDownloadUrls(string preferredUrl)
+    /// <summary>
+    /// Mirror list with the last successful download first (if known).
+    /// Synchronous; does not run a throughput probe (used for status / defaults).
+    /// </summary>
+    private string[] BuildDownloadUrls()
     {
-        return GitHubMirrors.GetMirrors(_options.ReleaseZipUrl)
-            .OrderBy(url => string.Equals(url, preferredUrl, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+        return OrderMirrors(GitHubMirrors.GetMirrors(_options.ReleaseZipUrl), _preferredMirrorIndex);
+    }
+
+    /// <summary>
+    /// Package download order: preferred mirror first when known; otherwise
+    /// <see cref="GitHubMirrors.GetFastestMirror"/> picks the first try, then the rest.
+    /// </summary>
+    private async Task<string[]> BuildDownloadUrlsForPackageAsync(CancellationToken cancellationToken)
+    {
+        var mirrors = GitHubMirrors.GetMirrors(_options.ReleaseZipUrl);
+        if (_preferredMirrorIndex >= 0 && _preferredMirrorIndex < mirrors.Length)
+        {
+            Log.ZLogInformation(
+                $"Using remembered update mirror index {_preferredMirrorIndex}: {mirrors[_preferredMirrorIndex]}");
+            return OrderMirrors(mirrors, _preferredMirrorIndex);
+        }
+
+        var fastest = await GitHubMirrors
+            .GetFastestMirror(_options.ReleaseZipUrl, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        if (string.IsNullOrEmpty(fastest))
+        {
+            Log.ZLogWarning($"GetFastestMirror found no usable mirror; trying default order");
+            return mirrors;
+        }
+
+        var preferred = GetMirrorIndex(fastest);
+        Log.ZLogInformation($"GetFastestMirror selected index {preferred}: {fastest}");
+        return OrderMirrors(mirrors, preferred);
+    }
+
+    private static string[] OrderMirrors(string[] mirrors, int preferredIndex)
+    {
+        if (preferredIndex < 0 || preferredIndex >= mirrors.Length)
+            return mirrors;
+
+        return mirrors
+            .Select((url, index) => (url, index))
+            .OrderBy(x => x.index == preferredIndex ? 0 : 1)
+            .ThenBy(x => x.index)
+            .Select(x => x.url)
             .ToArray();
     }
 
-    private sealed record VersionCheckResult(string DownloadUrl, int RemoteVersion);
+    private static int GetMirrorIndex(string? mirrorUrl)
+    {
+        if (string.IsNullOrWhiteSpace(mirrorUrl))
+            return -1;
+        if (mirrorUrl.Contains("ghfast.top", StringComparison.OrdinalIgnoreCase))
+            return 1;
+        if (mirrorUrl.Contains("gh-proxy.com", StringComparison.OrdinalIgnoreCase))
+            return 2;
+        if (mirrorUrl.Contains("github.com", StringComparison.OrdinalIgnoreCase))
+            return 0;
+        return -1;
+    }
 
-    private async Task<VersionCheckResult?> DownloadFirstVersionTextAsync()
+    private void RememberPreferredMirror(string successfulMirrorUrl)
+    {
+        var index = GetMirrorIndex(successfulMirrorUrl);
+        if (index >= 0)
+            _preferredMirrorIndex = index;
+    }
+
+    /// <summary>
+    /// Races version.txt mirrors for the remote build number only.
+    /// Does not influence zip download mirror order.
+    /// </summary>
+    private async Task<int?> DownloadFirstVersionTextAsync()
     {
         var versionUrls = GitHubMirrors.GetMirrors(_options.VersionTxtUrl);
-        var downloadUrls = GitHubMirrors.GetMirrors(_options.ReleaseZipUrl);
         using var cts = new CancellationTokenSource();
         var tasks = versionUrls
-            .Select((url, index) => DownloadVersionTextAsync(url, downloadUrls[index], cts.Token))
+            .Select(url => DownloadVersionTextAsync(url, cts.Token))
             .ToList();
 
         try
@@ -562,16 +654,15 @@ public sealed class AutoUpdater
         return null;
     }
 
-    private async Task<VersionCheckResult?> DownloadVersionTextAsync(
+    private async Task<int?> DownloadVersionTextAsync(
         string versionUrl,
-        string downloadUrl,
         CancellationToken cancellationToken)
     {
         var text = await DownloadTextAsync(versionUrl, VersionCheckTimeout, cancellationToken).ConfigureAwait(false);
         if (!int.TryParse(text?.Trim(), out var remoteVersion) || remoteVersion <= 0)
             return null;
 
-        return new VersionCheckResult(downloadUrl, remoteVersion);
+        return remoteVersion;
     }
 
     private static string QuoteProcessArgument(string value)
