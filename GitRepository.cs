@@ -8,6 +8,13 @@ public class GitRepository
     private static readonly TimeSpan QuickCommandTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan LocalCommandTimeout = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan NetworkCommandTimeout = TimeSpan.FromMinutes(5);
+
+    // ssh 默认没有任何连接超时，远端主机不可达时 git 会一直挂着，只能等命令超时被强杀。
+    // 显式给 ssh 加上连接超时和保活，让不可达的远端在十几秒内失败。
+    // 已有的 http.lowSpeedLimit/lowSpeedTime 只对 HTTP 传输生效，管不到 ssh。
+    private const string DefaultSshCommand =
+        "ssh -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o BatchMode=yes";
+
     private readonly SemaphoreSlim _commandLock = new(1, 1);
 
     public string RootPath { get; }
@@ -20,11 +27,18 @@ public class GitRepository
     public string LastOutput { get; private set; } = "";
     public string LastError { get; private set; } = "";
 
+    /// <summary>
+    /// 最近一次命令的失败是否属于“连不上远端”：网络类错误，或联网命令整体超时被强杀。
+    /// 用于跳过同一台远端主机上的其它库，避免每个库都白等一遍超时。
+    /// </summary>
+    public bool LastErrorIsRemoteUnreachable { get; private set; }
+
     public async Task<bool> RunGitCommand(
         string arguments,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
-        int retryCount = 0
+        int retryCount = 0,
+        bool isNetworkCommand = false
     )
     {
         try
@@ -34,6 +48,7 @@ public class GitRepository
         catch (OperationCanceledException)
         {
             LastError = "Git 操作已取消。";
+            LastErrorIsRemoteUnreachable = false;
             return false;
         }
 
@@ -44,7 +59,8 @@ public class GitRepository
                 var success = await RunGitCommandOnce(
                     arguments,
                     timeout ?? LocalCommandTimeout,
-                    cancellationToken
+                    cancellationToken,
+                    isNetworkCommand
                 );
                 if (success || attempt >= retryCount || !IsTransientNetworkError(LastError))
                     return success;
@@ -55,6 +71,7 @@ public class GitRepository
         catch (OperationCanceledException)
         {
             LastError = "Git 操作已取消。";
+            LastErrorIsRemoteUnreachable = false;
             return false;
         }
         finally
@@ -66,31 +83,36 @@ public class GitRepository
     private async Task<bool> RunGitCommandOnce(
         string arguments,
         TimeSpan timeout,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        bool isNetworkCommand
     )
     {
         LastOutput = "";
         LastError = "";
+        LastErrorIsRemoteUnreachable = false;
 
-        using var process = new Process
+        var startInfo = new ProcessStartInfo
         {
-            StartInfo = new ProcessStartInfo
+            FileName = ExePath,
+            Arguments = arguments,
+            WorkingDirectory = RootPath,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            EnvironmentVariables =
             {
-                FileName = ExePath,
-                Arguments = arguments,
-                WorkingDirectory = RootPath,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-                EnvironmentVariables =
-                {
-                    ["GIT_TERMINAL_PROMPT"] = "0",
-                    ["GCM_INTERACTIVE"] = "Never",
-                    ["SSH_ASKPASS_REQUIRE"] = "never",
-                },
+                ["GIT_TERMINAL_PROMPT"] = "0",
+                ["GCM_INTERACTIVE"] = "Never",
+                ["SSH_ASKPASS_REQUIRE"] = "never",
             },
         };
+
+        // 外部已经配置了 GIT_SSH_COMMAND 时以外部为准，不覆盖用户自己的 ssh 设置。
+        if (!startInfo.EnvironmentVariables.ContainsKey("GIT_SSH_COMMAND"))
+            startInfo.EnvironmentVariables["GIT_SSH_COMMAND"] = DefaultSshCommand;
+
+        using var process = new Process { StartInfo = startInfo };
 
         try
         {
@@ -127,12 +149,18 @@ public class GitRepository
             var commandError = await ReadCompletedOutput(errorTask);
 
             if (cancellationToken.IsCancellationRequested)
+            {
                 LastError = JoinError("Git 操作已取消。", commandError);
+            }
             else
+            {
                 LastError = JoinError(
                     $"Git 命令执行超过 {FormatTimeout(timeout)}，已终止进程。",
                     commandError
                 );
+                // 联网命令整体超时，基本都是远端连不上，按不可达处理。
+                LastErrorIsRemoteUnreachable = isNetworkCommand;
+            }
 
             return false;
         }
@@ -148,6 +176,7 @@ public class GitRepository
             : standardError.Trim();
         if (string.IsNullOrWhiteSpace(LastError))
             LastError = $"Git 命令失败，退出代码：{process.ExitCode}。";
+        LastErrorIsRemoteUnreachable = isNetworkCommand && IsRemoteUnreachableError(LastError);
         return false;
     }
 
@@ -220,7 +249,29 @@ public class GitRepository
             "unable to access",
         ];
 
-        return transientErrors.Any(item => error.Contains(item, StringComparison.OrdinalIgnoreCase));
+        return transientErrors.Any(item => error.Contains(item, StringComparison.OrdinalIgnoreCase))
+            || IsRemoteUnreachableError(error);
+    }
+
+    // 连接根本建立不起来，说明远端主机本身连不上，而不是认证、仓库内容或传输中断的问题。
+    // 只收连接阶段的错误：传输中途断开（connection reset 等）说明主机是通的，不能据此跳过其它库。
+    private static bool IsRemoteUnreachableError(string error)
+    {
+        string[] unreachableErrors =
+        [
+            "connection refused",
+            "connection timed out",
+            "could not resolve host",
+            "failed to connect",
+            "host is unreachable",
+            "network is unreachable",
+            "no route to host",
+            "operation timed out",
+        ];
+
+        return unreachableErrors.Any(item =>
+            error.Contains(item, StringComparison.OrdinalIgnoreCase)
+        );
     }
 
     public Task<bool> Fetch(CancellationToken cancellationToken = default)
@@ -229,7 +280,8 @@ public class GitRepository
             "-c http.lowSpeedLimit=1 -c http.lowSpeedTime=60 fetch --prune --recurse-submodules=on-demand --progress",
             NetworkCommandTimeout,
             cancellationToken,
-            retryCount: 1
+            retryCount: 1,
+            isNetworkCommand: true
         );
     }
 
@@ -244,7 +296,8 @@ public class GitRepository
             "-c http.lowSpeedLimit=1 -c http.lowSpeedTime=60 submodule update --init --recursive --progress",
             NetworkCommandTimeout,
             cancellationToken,
-            retryCount: 1
+            retryCount: 1,
+            isNetworkCommand: true
         );
     }
 
@@ -415,7 +468,8 @@ public class GitRepository
         return RunGitCommand(
             "-c http.lowSpeedLimit=1 -c http.lowSpeedTime=60 push --progress",
             NetworkCommandTimeout,
-            cancellationToken
+            cancellationToken,
+            isNetworkCommand: true
         );
     }
 
