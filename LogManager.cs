@@ -40,6 +40,14 @@ public static class LogManager
     public static string LogsDirectory { get; set; } = "Logs";
     public static RollingInterval RollingInterval { get; set; } = RollingInterval.Day;
 
+    /// <summary>
+    ///     是否让本进程接管 Logs/AppName.log 这个"当前日志"别名。
+    ///     短生命周期的命令进程应设为 false：它们跑几百毫秒就退出，
+    ///     却会把别名从常驻进程那里抢过来，让"当前日志"只剩那几行。
+    ///     必须在第一次写日志之前设置。
+    /// </summary>
+    public static bool UpdateCurrentLogAlias { get; set; } = true;
+
     // Big log file is easy to search and analyze.
     // VSCode will disable highlight when file bigger than 1024 MB, so set it to 1000 MB.
     public static int RollingSizeKB { get; set; } = 1000 * 1024;
@@ -95,10 +103,20 @@ public static class LogManager
                             $"{appName}_{timestamp.ToLocalTime():yyyy-MM-dd_HH-mm-ss}_{sequenceNumber}.log"
                         );
                         CurrentRollingLogFile = rollingPath;
-                        CurrentLogFile = currentAliasPath; // stable name for "current log"
 
-                        // Best-effort: create/update alias to current rolling file (hardlink only).
-                        TryUpdateCurrentLogAlias(currentAliasPath, rollingPath);
+                        if (UpdateCurrentLogAlias)
+                        {
+                            CurrentLogFile = currentAliasPath; // stable name for "current log"
+
+                            // Best-effort: create/update alias to current rolling file (hardlink only).
+                            TryUpdateCurrentLogAlias(currentAliasPath, rollingPath);
+                        }
+                        else
+                        {
+                            // 不接管别名时，"当前日志"就指向自己的滚动文件，
+                            // 免得指到别的进程维护的别名上去。
+                            CurrentLogFile = rollingPath;
+                        }
 
                         return rollingPath;
                     };
