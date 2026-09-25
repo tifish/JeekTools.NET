@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -22,7 +24,8 @@ namespace JeekTools;
 internal sealed class McpPipeServer(
     string pipeName,
     int maxSessions,
-    Func<JsonNode, Task<JsonNode?>> dispatch)
+    TimeSpan idleTimeout,
+    Func<JsonNode, CancellationToken, Task<JsonNode?>> dispatch)
 {
     private static readonly ILogger Log = LogManager.CreateLogger(nameof(McpPipeServer));
     private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
@@ -103,27 +106,118 @@ internal sealed class McpPipeServer(
 
     private async Task ServeAsync(NamedPipeServerStream pipe, CancellationToken token)
     {
+        using var session = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var requests = new ConcurrentDictionary<string, CancellationTokenSource>(StringComparer.Ordinal);
+        var tasks = new ConcurrentDictionary<int, Task>();
+        using var writeGate = new SemaphoreSlim(1, 1);
+        var lastActivity = Stopwatch.GetTimestamp();
+        var taskId = 0;
+        StreamWriter? writer = null;
+
+        async Task WriteAsync(JsonNode response)
+        {
+            await writeGate.WaitAsync(session.Token).ConfigureAwait(false);
+            try
+            {
+                await writer!.WriteLineAsync(
+                    response.ToJsonString().AsMemory(),
+                    session.Token).ConfigureAwait(false);
+                Interlocked.Exchange(ref lastActivity, Stopwatch.GetTimestamp());
+            }
+            finally
+            {
+                writeGate.Release();
+            }
+        }
+
+        async Task ProcessAsync(JsonNode message, string? requestKey)
+        {
+            CancellationTokenSource? request = null;
+            try
+            {
+                request = CancellationTokenSource.CreateLinkedTokenSource(session.Token);
+                if (requestKey is not null && !requests.TryAdd(requestKey, request))
+                    throw new InvalidOperationException($"A request with id {requestKey} is already running.");
+
+                var response = await dispatch(message, request.Token).ConfigureAwait(false);
+                if (response is not null)
+                    await WriteAsync(response).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (session.IsCancellationRequested)
+            {
+                // Session ended; there is nowhere left to send a response.
+            }
+            catch (Exception ex)
+            {
+                var response = new JsonObject
+                {
+                    ["jsonrpc"] = "2.0",
+                    ["id"] = RequestId(message)?.DeepClone(),
+                    ["error"] = new JsonObject
+                    {
+                        ["code"] = -32603,
+                        ["message"] = ex.Message,
+                    },
+                };
+                try { await WriteAsync(response).ConfigureAwait(false); }
+                catch (OperationCanceledException) { /* session ended */ }
+            }
+            finally
+            {
+                if (requestKey is not null)
+                    requests.TryRemove(requestKey, out _);
+                request?.Dispose();
+            }
+        }
+
+        async Task ReapIdleSessionAsync()
+        {
+            if (idleTimeout <= TimeSpan.Zero || idleTimeout == Timeout.InfiniteTimeSpan)
+                return;
+
+            var interval = TimeSpan.FromSeconds(Math.Clamp(idleTimeout.TotalSeconds / 4, 1, 30));
+            try
+            {
+                while (!session.IsCancellationRequested)
+                {
+                    await Task.Delay(interval, session.Token).ConfigureAwait(false);
+                    if (requests.IsEmpty
+                        && Stopwatch.GetElapsedTime(Interlocked.Read(ref lastActivity)) >= idleTimeout)
+                    {
+                        Log.ZLogInformation($"Closing idle MCP pipe session on {PipeName}");
+                        session.Cancel();
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Session ended normally.
+            }
+        }
+
         try
         {
             using var reader = new StreamReader(pipe, Utf8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-            await using var writer = new StreamWriter(pipe, Utf8, leaveOpen: true) { AutoFlush = true };
+            await using var sessionWriter = new StreamWriter(pipe, Utf8, leaveOpen: true) { AutoFlush = true };
+            writer = sessionWriter;
+            var idleReaper = ReapIdleSessionAsync();
 
-            while (!token.IsCancellationRequested
-                   && await reader.ReadLineAsync(token).ConfigureAwait(false) is { } line)
+            while (!session.IsCancellationRequested
+                   && await reader.ReadLineAsync(session.Token).ConfigureAwait(false) is { } line)
             {
                 if (line.Length == 0)
                     continue;
 
-                JsonNode? response;
+                Interlocked.Exchange(ref lastActivity, Stopwatch.GetTimestamp());
+                JsonNode message;
                 try
                 {
-                    var message = JsonNode.Parse(line)
-                                  ?? throw new InvalidDataException("Empty JSON-RPC message.");
-                    response = await dispatch(message).ConfigureAwait(false);
+                    message = JsonNode.Parse(line)
+                              ?? throw new InvalidDataException("Empty JSON-RPC message.");
                 }
                 catch (Exception ex)
                 {
-                    response = new JsonObject
+                    await WriteAsync(new JsonObject
                     {
                         ["jsonrpc"] = "2.0",
                         ["id"] = null,
@@ -132,15 +226,30 @@ internal sealed class McpPipeServer(
                             ["code"] = -32700,
                             ["message"] = $"Parse error: {ex.Message}",
                         },
-                    };
+                    }).ConfigureAwait(false);
+                    continue;
                 }
 
-                // Notifications produce no response; keep reading.
-                if (response is null)
+                if (TryGetCancelledRequest(message, out var cancelled))
+                {
+                    if (requests.TryGetValue(cancelled, out var request))
+                        request.Cancel();
                     continue;
+                }
 
-                await writer.WriteLineAsync(response.ToJsonString().AsMemory(), token).ConfigureAwait(false);
+                var key = RequestKey(message);
+                var id = Interlocked.Increment(ref taskId);
+                var task = ProcessAsync(message, key);
+                tasks[id] = task;
+                _ = task.ContinueWith(
+                    _ => tasks.TryRemove(id, out var removed),
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
             }
+
+            session.Cancel();
+            await idleReaper.ConfigureAwait(false);
         }
         catch (IOException)
         {
@@ -156,6 +265,19 @@ internal sealed class McpPipeServer(
         }
         finally
         {
+            try { session.Cancel(); } catch (ObjectDisposedException) { /* already ending */ }
+            foreach (var request in requests.Values)
+                try { request.Cancel(); } catch (ObjectDisposedException) { /* completed concurrently */ }
+
+            try
+            {
+                await Task.WhenAll(tasks.Values).WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+            }
+            catch
+            {
+                // A handler may not observe cancellation; the closed pipe still releases the slot.
+            }
+
             try
             {
                 if (pipe.IsConnected)
@@ -168,6 +290,29 @@ internal sealed class McpPipeServer(
 
             await pipe.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    private static JsonNode? RequestId(JsonNode message) => message switch
+    {
+        JsonObject single => single["id"],
+        JsonArray batch => batch.OfType<JsonObject>().Select(entry => entry["id"]).FirstOrDefault(id => id is not null),
+        _ => null,
+    };
+
+    private static string? RequestKey(JsonNode message) => RequestId(message)?.ToJsonString();
+
+    private static bool TryGetCancelledRequest(JsonNode message, out string requestKey)
+    {
+        requestKey = "";
+        if (message is not JsonObject notification
+            || notification["method"]?.GetValue<string>() != "notifications/cancelled"
+            || notification["params"]?["requestId"] is not { } requestId)
+        {
+            return false;
+        }
+
+        requestKey = requestId.ToJsonString();
+        return true;
     }
 
     /// <summary>

@@ -33,7 +33,10 @@ public sealed class McpHostOptions
     public string? PipeName { get; init; }
 
     /// <summary>Concurrent pipe sessions (one per connected client).</summary>
-    public int MaxPipeSessions { get; init; } = 8;
+    public int MaxPipeSessions { get; init; } = 32;
+
+    /// <summary>How long a connected pipe session with no active requests may remain idle.</summary>
+    public TimeSpan PipeSessionIdleTimeout { get; init; } = TimeSpan.FromMinutes(10);
 
     /// <summary>First port to try; scans upward when taken. Zero or less disables HTTP
     /// entirely, leaving the pipe as the only transport.</summary>
@@ -87,7 +90,7 @@ public sealed class McpHost
     private static readonly JsonSerializerOptions PrettyOptions = new() { WriteIndented = true };
 
     private readonly McpHostOptions _options;
-    private readonly Dictionary<string, Func<JsonObject, Task<JsonObject>>> _tools = [];
+    private readonly Dictionary<string, Func<JsonObject, CancellationToken, Task<JsonObject>>> _tools = [];
     private HttpListener? _listener;
     private Mutex? _portReservation;
     private McpPipeServer? _pipeServer;
@@ -111,6 +114,10 @@ public sealed class McpHost
 
     /// <summary>Registers (or replaces) a tool handler.</summary>
     public void AddTool(string name, Func<JsonObject, Task<JsonObject>> handler) =>
+        _tools[name] = (args, _) => handler(args);
+
+    /// <summary>Registers a tool handler that can observe JSON-RPC cancellation.</summary>
+    public void AddTool(string name, Func<JsonObject, CancellationToken, Task<JsonObject>> handler) =>
         _tools[name] = handler;
 
     public void Start()
@@ -190,7 +197,11 @@ public sealed class McpHost
         if (_pipeServer is not null || _options.PipeName is not { Length: > 0 } name)
             return;
 
-        var server = new McpPipeServer(name, _options.MaxPipeSessions, DispatchAsync);
+        var server = new McpPipeServer(
+            name,
+            _options.MaxPipeSessions,
+            _options.PipeSessionIdleTimeout,
+            DispatchAsync);
         _pipeServer = server;
         PipeName = name;
         server.Start();
@@ -321,8 +332,8 @@ public sealed class McpHost
                 var message = JsonNode.Parse(body);
                 responseNode = message switch
                 {
-                    JsonObject single => await HandleMessageAsync(single),
-                    JsonArray batch => await HandleBatchAsync(batch),
+                    JsonObject single => await HandleMessageAsync(single, CancellationToken.None),
+                    JsonArray batch => await HandleBatchAsync(batch, CancellationToken.None),
                     _ => RpcError(null, -32600, "Invalid request"),
                 };
             }
@@ -378,28 +389,28 @@ public sealed class McpHost
 
     /// <summary>Transport-agnostic entry point: one parsed JSON-RPC message in, its reply
     /// (or null for notifications) out. Shared by the HTTP listener and the pipe server.</summary>
-    private Task<JsonNode?> DispatchAsync(JsonNode message) => message switch
+    private Task<JsonNode?> DispatchAsync(JsonNode message, CancellationToken cancellationToken) => message switch
     {
-        JsonObject single => HandleMessageAsync(single),
-        JsonArray batch => HandleBatchAsync(batch),
+        JsonObject single => HandleMessageAsync(single, cancellationToken),
+        JsonArray batch => HandleBatchAsync(batch, cancellationToken),
         _ => Task.FromResult<JsonNode?>(RpcError(null, -32600, "Invalid request")),
     };
 
-    private async Task<JsonNode?> HandleBatchAsync(JsonArray batch)
+    private async Task<JsonNode?> HandleBatchAsync(JsonArray batch, CancellationToken cancellationToken)
     {
         var results = new JsonArray();
         foreach (var item in batch)
         {
             if (item is not JsonObject message)
                 continue;
-            if (await HandleMessageAsync(message) is { } result)
+            if (await HandleMessageAsync(message, cancellationToken) is { } result)
                 results.Add(result);
         }
 
         return results.Count > 0 ? results : null;
     }
 
-    private async Task<JsonNode?> HandleMessageAsync(JsonObject message)
+    private async Task<JsonNode?> HandleMessageAsync(JsonObject message, CancellationToken cancellationToken)
     {
         var id = message["id"]?.DeepClone();
         var isRequest = id != null;
@@ -420,12 +431,18 @@ public sealed class McpHost
                 case "tools/list":
                     return RpcResult(id, new JsonObject { ["tools"] = BuildToolList() });
                 case "tools/call":
-                    return RpcResult(id, await HandleToolCallAsync(message["params"] as JsonObject));
+                    return RpcResult(id, await HandleToolCallAsync(
+                        message["params"] as JsonObject,
+                        cancellationToken));
                 default:
                     if (method.StartsWith("notifications/", StringComparison.Ordinal))
                         return null;
                     return isRequest ? RpcError(id, -32601, $"Method not found: {method}") : null;
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return isRequest ? RpcError(id, -32800, "Request cancelled") : null;
         }
         catch (Exception ex)
         {
@@ -458,7 +475,9 @@ public sealed class McpHost
     private static JsonObject RpcError(JsonNode? id, int code, string message) =>
         new() { ["jsonrpc"] = "2.0", ["id"] = id, ["error"] = new JsonObject { ["code"] = code, ["message"] = message } };
 
-    private async Task<JsonObject> HandleToolCallAsync(JsonObject? parameters)
+    private async Task<JsonObject> HandleToolCallAsync(
+        JsonObject? parameters,
+        CancellationToken cancellationToken)
     {
         var name = parameters?["name"]?.GetValue<string>()
                    ?? throw new InvalidOperationException("tools/call requires params.name");
@@ -468,7 +487,11 @@ public sealed class McpHost
         {
             if (!_tools.TryGetValue(name, out var handler))
                 throw new InvalidOperationException($"Unknown tool: {name}");
-            return await handler(args);
+            return await handler(args, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
