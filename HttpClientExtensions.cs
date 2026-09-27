@@ -27,16 +27,22 @@ public static class HttpClientExtensions
         if (progress == null || !contentLength.HasValue)
         {
             await download.CopyToAsync(destination, cancellationToken);
+            progress?.Report(1);
             return;
         }
 
         // Convert absolute progress (bytes downloaded) into relative progress (0% - 100%)
-        var relativeProgress = new Progress<long>(totalBytes =>
-            progress.Report((float)totalBytes / contentLength.Value)
-        );
+        var relativeProgress = new RelativeDownloadProgress(progress, contentLength.Value);
         // Use extension method to report progress while downloading
         await download.CopyToAsync(destination, 81920, relativeProgress, cancellationToken);
         progress.Report(1);
+    }
+
+    // 仅转换进度数值，避免每个数据块都额外排队到线程池，造成回调积压和乱序。
+    private sealed class RelativeDownloadProgress(IProgress<float> progress, long contentLength)
+        : IProgress<long>
+    {
+        public void Report(long totalBytes) => progress.Report((float)totalBytes / contentLength);
     }
 
     public static async Task<bool> TestUrl(
