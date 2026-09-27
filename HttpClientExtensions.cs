@@ -14,14 +14,14 @@ public static class HttpClientExtensions
         using var response = await client.GetAsync(
             requestUri,
             HttpCompletionOption.ResponseHeadersRead,
-            CancellationToken.None
+            cancellationToken
         );
         if (!response.IsSuccessStatusCode)
             throw new IOException($"Failed to download {requestUri}");
 
         var contentLength = response.Content.Headers.ContentLength;
 
-        await using var download = await response.Content.ReadAsStreamAsync(CancellationToken.None);
+        await using var download = await response.Content.ReadAsStreamAsync(cancellationToken);
         // Ignore progress reporting when no progress reporter was
         // passed or when the content length is unknown
         if (progress == null || !contentLength.HasValue)
