@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -16,7 +15,8 @@ namespace JeekTools;
 /// config; there is no firewall prompt, and access is limited to the current user by the
 /// pipe ACL rather than by a secret in a URL. Each accepted client owns a pipe instance,
 /// which is also its MCP session, and the duplex stream leaves room for server-initiated
-/// notifications that a POST/response HTTP listener cannot deliver.
+/// notifications that a POST/response HTTP listener cannot deliver. A session ends when its
+/// client closes the pipe, never on an idle timer: a quiet client is still a live agent.
 ///
 /// Framing is one JSON-RPC message per line — the same framing the stdio adapter speaks on
 /// the other end, so it forwards bytes without reframing.
@@ -24,7 +24,6 @@ namespace JeekTools;
 internal sealed class McpPipeServer(
     string pipeName,
     int maxSessions,
-    TimeSpan idleTimeout,
     Func<JsonNode, CancellationToken, Task<JsonNode?>> dispatch)
 {
     private static readonly ILogger Log = LogManager.CreateLogger(nameof(McpPipeServer));
@@ -110,7 +109,6 @@ internal sealed class McpPipeServer(
         var requests = new ConcurrentDictionary<string, CancellationTokenSource>(StringComparer.Ordinal);
         var tasks = new ConcurrentDictionary<int, Task>();
         using var writeGate = new SemaphoreSlim(1, 1);
-        var lastActivity = Stopwatch.GetTimestamp();
         var taskId = 0;
         StreamWriter? writer = null;
 
@@ -122,7 +120,6 @@ internal sealed class McpPipeServer(
                 await writer!.WriteLineAsync(
                     response.ToJsonString().AsMemory(),
                     session.Token).ConfigureAwait(false);
-                Interlocked.Exchange(ref lastActivity, Stopwatch.GetTimestamp());
             }
             finally
             {
@@ -170,37 +167,11 @@ internal sealed class McpPipeServer(
             }
         }
 
-        async Task ReapIdleSessionAsync()
-        {
-            if (idleTimeout <= TimeSpan.Zero || idleTimeout == Timeout.InfiniteTimeSpan)
-                return;
-
-            var interval = TimeSpan.FromSeconds(Math.Clamp(idleTimeout.TotalSeconds / 4, 1, 30));
-            try
-            {
-                while (!session.IsCancellationRequested)
-                {
-                    await Task.Delay(interval, session.Token).ConfigureAwait(false);
-                    if (requests.IsEmpty
-                        && Stopwatch.GetElapsedTime(Interlocked.Read(ref lastActivity)) >= idleTimeout)
-                    {
-                        Log.ZLogInformation($"Closing idle MCP pipe session on {PipeName}");
-                        session.Cancel();
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Session ended normally.
-            }
-        }
-
         try
         {
             using var reader = new StreamReader(pipe, Utf8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
             await using var sessionWriter = new StreamWriter(pipe, Utf8, leaveOpen: true) { AutoFlush = true };
             writer = sessionWriter;
-            var idleReaper = ReapIdleSessionAsync();
 
             while (!session.IsCancellationRequested
                    && await reader.ReadLineAsync(session.Token).ConfigureAwait(false) is { } line)
@@ -208,7 +179,6 @@ internal sealed class McpPipeServer(
                 if (line.Length == 0)
                     continue;
 
-                Interlocked.Exchange(ref lastActivity, Stopwatch.GetTimestamp());
                 JsonNode message;
                 try
                 {
@@ -249,7 +219,6 @@ internal sealed class McpPipeServer(
             }
 
             session.Cancel();
-            await idleReaper.ConfigureAwait(false);
         }
         catch (IOException)
         {
@@ -337,7 +306,9 @@ internal sealed class McpPipeServer(
         return NamedPipeServerStreamAcl.Create(
             PipeName,
             PipeDirection.InOut,
-            Math.Max(1, maxSessions),
+            maxSessions == NamedPipeServerStream.MaxAllowedServerInstances
+                ? maxSessions
+                : Math.Clamp(maxSessions, 1, 254),
             PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous | PipeOptions.WriteThrough,
             inBufferSize: 0,

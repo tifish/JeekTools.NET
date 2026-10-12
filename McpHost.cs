@@ -1,3 +1,4 @@
+using System.IO.Pipes;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -32,11 +33,13 @@ public sealed class McpHostOptions
     /// </summary>
     public string? PipeName { get; init; }
 
-    /// <summary>Concurrent pipe sessions (one per connected client).</summary>
-    public int MaxPipeSessions { get; init; } = 32;
-
-    /// <summary>How long a connected pipe session with no active requests may remain idle.</summary>
-    public TimeSpan PipeSessionIdleTimeout { get; init; } = TimeSpan.FromMinutes(10);
+    /// <summary>
+    /// Concurrent pipe sessions (one per connected client). Defaults to as many as Windows
+    /// allows: a session lives exactly as long as its client keeps the pipe open — the
+    /// stdio adapter exits, and so closes it, when its agent closes stdin — so there is
+    /// nothing to reclaim by timing idle clients out, only live agents to turn away.
+    /// </summary>
+    public int MaxPipeSessions { get; init; } = NamedPipeServerStream.MaxAllowedServerInstances;
 
     /// <summary>First port to try; scans upward when taken. Zero or less disables HTTP
     /// entirely, leaving the pipe as the only transport.</summary>
@@ -200,7 +203,6 @@ public sealed class McpHost
         var server = new McpPipeServer(
             name,
             _options.MaxPipeSessions,
-            _options.PipeSessionIdleTimeout,
             DispatchAsync);
         _pipeServer = server;
         PipeName = name;
