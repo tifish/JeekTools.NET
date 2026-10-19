@@ -65,9 +65,12 @@ public static class LogManager
 
             if (ToFile)
             {
-                var appName =
-                    Path.GetFileNameWithoutExtension(Assembly.GetEntryAssembly()?.Location)
-                    ?? "Unknown";
+                // Assembly.Location is empty in single-file apps, so use the assembly name.
+                var appName = Assembly.GetEntryAssembly()?.GetName().Name;
+                if (string.IsNullOrEmpty(appName))
+                    appName = Path.GetFileNameWithoutExtension(Environment.ProcessPath);
+                if (string.IsNullOrEmpty(appName))
+                    appName = "Unknown";
                 var logsDir = Path.Combine(
                     AppDomain.CurrentDomain.SetupInformation.ApplicationBase ?? string.Empty,
                     LogsDirectory
