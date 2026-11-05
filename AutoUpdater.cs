@@ -87,14 +87,17 @@ public sealed class AutoUpdater
     private static readonly TimeSpan VersionCheckTimeout = TimeSpan.FromSeconds(5);
 
     // Mirror-switching policy: abandon a mirror that stalls completely for
-    // DownloadIdleTimeout, and — as long as another mirror remains — one that
-    // stays below MinimumDownloadBytesPerSecond for a full SlowDownloadWindow.
+    // DownloadIdleTimeout, and one that stays below MinimumDownloadBytesPerSecond
+    // for a full SlowDownloadWindow. If all usable mirrors are slow, retry the
+    // fastest observed one without a speed floor, rather than keeping the last.
     private static readonly TimeSpan DownloadIdleTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan SlowDownloadWindow = TimeSpan.FromSeconds(10);
     private const long MinimumDownloadBytesPerSecond = 512 * 1024;
 
     private readonly AutoUpdaterOptions _options;
     private readonly string _appName;
+    private readonly Func<HttpClient> _createClient;
+    private readonly TimeSpan _slowDownloadWindow;
 
     /// <summary>
     /// Index into <see cref="GitHubMirrors.GetMirrors"/> of the last zip that
@@ -103,8 +106,16 @@ public sealed class AutoUpdater
     private int _preferredMirrorIndex = -1;
 
     public AutoUpdater(AutoUpdaterOptions options)
+        : this(options, () => new HttpClient { Timeout = Timeout.InfiniteTimeSpan }, SlowDownloadWindow)
+    {
+    }
+
+    // Deterministic transport/timing seam for downloader regression tests.
+    internal AutoUpdater(AutoUpdaterOptions options, Func<HttpClient> createClient, TimeSpan slowDownloadWindow)
     {
         _options = options;
+        _createClient = createClient;
+        _slowDownloadWindow = slowDownloadWindow;
         _appName = Path.GetFileNameWithoutExtension(options.AppExeName);
         DownloadUrl = options.ReleaseZipUrl;
         DownloadUrls = [options.ReleaseZipUrl];
@@ -237,54 +248,61 @@ public sealed class AutoUpdater
             return null;
         }
 
-        // Prefer last successful mirror; on first download probe throughput instead.
-        // Not derived from the version.txt race.
-        string[] mirrors;
-        if (urls is not null)
-        {
-            mirrors = urls
-                .Where(url => !string.IsNullOrWhiteSpace(url))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-        }
-        else
-        {
-            mirrors = await BuildDownloadUrlsForPackageAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        if (mirrors.Length == 0)
-        {
-            FailureReason = "no download URLs";
-            return null;
-        }
-
-        DownloadUrls = mirrors;
-        DownloadUrl = mirrors[0];
-
         var zipPath = StagedZipPath;
         var packageDir = PackageDir;
-
         try
         {
+            // Prefer last successful mirror; on first download probe throughput instead.
+            // Not derived from the version.txt race.
+            string[] mirrors;
+            if (urls is not null)
+            {
+                mirrors = urls
+                    .Where(url => !string.IsNullOrWhiteSpace(url))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+            }
+            else
+            {
+                mirrors = await BuildDownloadUrlsForPackageAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (mirrors.Length == 0)
+            {
+                FailureReason = "no download URLs";
+                return null;
+            }
+
+            DownloadUrls = mirrors;
+            DownloadUrl = mirrors[0];
+
             ClearUpdateRoot();
             Directory.CreateDirectory(packageDir);
 
             var downloaded = false;
             var lastError = "";
             string? winnerUrl = null;
-            for (var i = 0; i < mirrors.Length; i++)
+            string? fastestSlowUrl = null;
+            double fastestSlowSpeed = 0;
+            // One final attempt is reserved for the fastest slow mirror. HTTP
+            // failures/stalls are not eligible, and this retry never loops.
+            for (var i = 0; i <= mirrors.Length; i++)
             {
+                var retrySlowMirror = i == mirrors.Length;
+                if (retrySlowMirror && fastestSlowUrl is null)
+                    break;
+                var url = retrySlowMirror ? fastestSlowUrl! : mirrors[i];
                 TryDelete(() => File.Delete(zipPath));
 
-                // Give up early on a slow mirror only while a faster fallback
-                // is still available; the last mirror may crawl to the finish.
-                var minimumSpeed = i < mirrors.Length - 1 ? MinimumDownloadBytesPerSecond : 0;
+                var minimumSpeed = mirrors.Length > 1 && !retrySlowMirror ? MinimumDownloadBytesPerSecond : 0;
+                if (retrySlowMirror)
+                    Log.ZLogInformation($"All usable update mirrors are slow; retrying fastest observed: {url} ({fastestSlowSpeed / 1024:0} KB/s)");
                 try
                 {
-                    await DownloadFileAsync(mirrors[i], zipPath, minimumSpeed, i, mirrors.Length, progress, cancellationToken)
+                    await DownloadFileAsync(url, zipPath, minimumSpeed, Array.IndexOf(mirrors, url), mirrors.Length, progress, cancellationToken)
                         .ConfigureAwait(false);
                     downloaded = true;
-                    winnerUrl = mirrors[i];
+                    winnerUrl = url;
                     break;
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -293,8 +311,13 @@ public sealed class AutoUpdater
                 }
                 catch (Exception ex)
                 {
+                    if (ex is SlowDownloadException slow && slow.BytesPerSecond > fastestSlowSpeed)
+                    {
+                        fastestSlowUrl = url;
+                        fastestSlowSpeed = slow.BytesPerSecond;
+                    }
                     lastError = ex.Message;
-                    Log.ZLogWarning($"Update download failed from {mirrors[i]}: {ex.Message}");
+                    Log.ZLogWarning($"Update download failed from {url}: {ex.Message}");
                 }
             }
 
@@ -351,7 +374,7 @@ public sealed class AutoUpdater
         CancellationToken cancellationToken)
     {
         // Stalls are policed per-read below, so the client itself never times out.
-        using var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        using var client = _createClient();
         client.DefaultRequestHeaders.UserAgent.ParseAdd(_options.UserAgent);
 
         using var headerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -397,14 +420,14 @@ public sealed class AutoUpdater
             received += read;
             windowReceived += read;
 
-            if (minimumBytesPerSecond > 0 && speedWindow.Elapsed >= SlowDownloadWindow)
+            if (minimumBytesPerSecond > 0 && speedWindow.Elapsed >= _slowDownloadWindow)
             {
                 var windowBytesPerSecond = windowReceived / speedWindow.Elapsed.TotalSeconds;
                 if (windowBytesPerSecond < minimumBytesPerSecond)
                 {
-                    throw new InvalidOperationException(
+                    throw new SlowDownloadException(windowBytesPerSecond,
                         $"Download speed stayed below {minimumBytesPerSecond / 1024} KB/s " +
-                        $"for {SlowDownloadWindow.TotalSeconds:0} seconds " +
+                        $"for {_slowDownloadWindow.TotalSeconds:0} seconds " +
                         $"(current: {windowBytesPerSecond / 1024:0} KB/s).");
                 }
 
@@ -427,6 +450,12 @@ public sealed class AutoUpdater
         var finalSpeed = received / Math.Max(stopwatch.Elapsed.TotalSeconds, 0.1);
         progress?.Report(new UpdateDownloadProgress(mirrorIndex, mirrorCount, received, totalBytes, finalSpeed));
         Log.ZLogInformation($"Downloaded {received} bytes from {url} in {stopwatch.Elapsed.TotalSeconds:0}s");
+    }
+
+    private sealed class SlowDownloadException(double bytesPerSecond, string message)
+        : IOException(message)
+    {
+        public double BytesPerSecond { get; } = bytesPerSecond;
     }
 
     /// <summary>
@@ -574,7 +603,7 @@ public sealed class AutoUpdater
         }
 
         var fastest = await GitHubMirrors
-            .GetFastestMirror(_options.ReleaseZipUrl, cancellationToken: cancellationToken)
+            .GetFastestMirror(_options.ReleaseZipUrl, cancellationToken: cancellationToken, userAgent: _options.UserAgent)
             .ConfigureAwait(false);
         if (string.IsNullOrEmpty(fastest))
         {
@@ -684,7 +713,8 @@ public sealed class AutoUpdater
     {
         try
         {
-            using var client = new HttpClient { Timeout = timeout };
+            using var client = _createClient();
+            client.Timeout = timeout;
             client.DefaultRequestHeaders.UserAgent.ParseAdd(_options.UserAgent);
             using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)

@@ -1,7 +1,11 @@
 using System.Diagnostics;
-using System.Net.Http.Headers;
+using Microsoft.Extensions.Logging;
+using ZLogger;
 
 namespace JeekTools;
+
+public sealed record GitHubMirrorProbeResult(
+    int Index, string Url, bool Ok, double BytesPerSecond, long Bytes, bool TimedOut);
 
 /// <summary>
 /// GitHub download mirrors for regions where github.com is slow or blocked:
@@ -12,7 +16,8 @@ namespace JeekTools;
 /// </summary>
 public static class GitHubMirrors
 {
-    /// <summary>Bytes to pull when probing throughput (Range request).</summary>
+    private static readonly ILogger Log = LogManager.CreateLogger(nameof(GitHubMirrors));
+    /// <summary>Maximum bytes to sample from a normal package GET.</summary>
     public const int DefaultProbeBytes = 2 * 1024 * 1024;
 
     /// <summary>Probes that transfer fewer than this many bytes are treated as failed.</summary>
@@ -53,7 +58,7 @@ public static class GitHubMirrors
     }
 
     /// <summary>
-    /// Picks a mirror by <b>throughput</b>: each mirror is Range-fetched for about
+    /// Picks a mirror by <b>throughput</b>: each mirror is sampled for up to
     /// <paramref name="probeBytes"/> in parallel (with a per-mirror timeout); the
     /// highest bytes/second wins. Ties prefer lower indices (github.com first).
     /// Results are cached for <see cref="DefaultProbeCacheTtl"/>.
@@ -63,8 +68,10 @@ public static class GitHubMirrors
         string url,
         int probeBytes = DefaultProbeBytes,
         TimeSpan? perMirrorTimeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? userAgent = null)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(url))
             return "";
 
@@ -83,13 +90,10 @@ public static class GitHubMirrors
             }
         }
 
-        var timeout = perMirrorTimeout ?? DefaultPerMirrorTimeout;
-        var probes = mirrors
-            .Select((mirror, index) =>
-                ProbeThroughputAsync(mirror, index, probeBytes, timeout, cancellationToken))
-            .ToArray();
-
-        var results = await Task.WhenAll(probes).ConfigureAwait(false);
+        var results = await ProbeMirrorsAsync(url, probeBytes, perMirrorTimeout, cancellationToken, userAgent)
+            .ConfigureAwait(false);
+        foreach (var result in results)
+            Log.ZLogInformation($"Update mirror probe: {result.Url}, usable={result.Ok}, bytes={result.Bytes}, speed={result.BytesPerSecond / 1024:0} KB/s, timedOut={result.TimedOut}");
 
         var best = results
             .Where(r => r.Ok)
@@ -97,7 +101,7 @@ public static class GitHubMirrors
             .ThenBy(r => r.Index)
             .FirstOrDefault();
 
-        if (!best.Ok)
+        if (best is null)
             return "";
 
         lock (Gate)
@@ -109,25 +113,43 @@ public static class GitHubMirrors
         return mirrors[best.Index];
     }
 
-    private static async Task<ProbeResult> ProbeThroughputAsync(
+    /// <summary>Uncached download samples, also exposed for updater diagnostics.
+    /// Use normal GETs: Range requests can take a different, slower cache path.
+    /// A timed-out sample is useful when enough bytes arrived before the deadline.</summary>
+    public static async Task<GitHubMirrorProbeResult[]> ProbeMirrorsAsync(
+        string url,
+        int probeBytes = DefaultProbeBytes,
+        TimeSpan? perMirrorTimeout = null,
+        CancellationToken cancellationToken = default,
+        string? userAgent = null)
+    {
+        var mirrors = GetMirrors(url);
+        return await Task.WhenAll(mirrors.Select((mirror, index) =>
+            ProbeThroughputAsync(mirror, index, Math.Max(probeBytes, DefaultMinUsefulBytes),
+                perMirrorTimeout ?? DefaultPerMirrorTimeout, cancellationToken, userAgent: userAgent))).ConfigureAwait(false);
+    }
+
+    internal static async Task<GitHubMirrorProbeResult> ProbeThroughputAsync(
         string url,
         int index,
         int probeBytes,
         TimeSpan timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        HttpClient? testClient = null,
+        string? userAgent = null)
     {
         var stopwatch = Stopwatch.StartNew();
+        long total = 0;
+        var timedOut = false;
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(timeout);
         try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(timeout);
-
             // Infinite client timeout; per-mirror CancelAfter bounds the probe.
-            using var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-            client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", DefaultUserAgent);
+            using var client = testClient ?? new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+            client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", userAgent ?? DefaultUserAgent);
 
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Range = new RangeHeaderValue(0, probeBytes - 1);
 
             using var response = await client
                 .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token)
@@ -138,7 +160,6 @@ public static class GitHubMirrors
                 .ConfigureAwait(false);
 
             var buffer = new byte[Math.Min(64 * 1024, probeBytes)];
-            long total = 0;
             while (total < probeBytes)
             {
                 var toRead = (int)Math.Min(buffer.Length, probeBytes - total);
@@ -148,20 +169,22 @@ public static class GitHubMirrors
                     break;
                 total += read;
             }
-
-            stopwatch.Stop();
-
-            if (total < DefaultMinUsefulBytes)
-                return new ProbeResult(index, Ok: false, BytesPerSecond: 0, Bytes: total);
-
-            var seconds = Math.Max(stopwatch.Elapsed.TotalSeconds, 0.001);
-            return new ProbeResult(index, Ok: true, BytesPerSecond: total / seconds, Bytes: total);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            timedOut = true;
         }
         catch
         {
-            return new ProbeResult(index, Ok: false, BytesPerSecond: 0, Bytes: 0);
+            return new GitHubMirrorProbeResult(index, url, false, 0, total, false);
         }
-    }
 
-    private readonly record struct ProbeResult(int Index, bool Ok, double BytesPerSecond, long Bytes);
+        var ok = total >= DefaultMinUsefulBytes;
+        return new GitHubMirrorProbeResult(index, url, ok,
+            ok ? total / Math.Max(stopwatch.Elapsed.TotalSeconds, 0.001) : 0, total, timedOut);
+    }
 }
