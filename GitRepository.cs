@@ -257,6 +257,13 @@ public class GitRepository
     // 只收连接阶段的错误：传输中途断开（connection reset 等）说明主机是通的，不能据此跳过其它库。
     private static bool IsRemoteUnreachableError(string error)
     {
+        // 密钥交换前断开属于连接阶段失败；传输中途单独出现 connection reset 仍不跳过同主机。
+        if (
+            error.Contains("kex_exchange_identification:", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("ssh_exchange_identification:", StringComparison.OrdinalIgnoreCase)
+        )
+            return true;
+
         string[] unreachableErrors =
         [
             "connection refused",
