@@ -12,21 +12,37 @@ public class FastObservableCollection<T> : ObservableCollection<T>, IFastObserva
     public void Replace(IEnumerable<T> other)
     {
         _suppressChangedEvent = true;
+        try
+        {
+            Clear();
+            foreach (var item in other)
+                Add(item);
+        }
+        finally
+        {
+            _suppressChangedEvent = false;
+        }
 
-        Clear();
-        AddRange(other);
+        OnCollectionChanged(
+            new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset)
+        );
+        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
     }
 
     public void Replace(IEnumerable other)
     {
         _suppressChangedEvent = true;
+        try
+        {
+            Clear();
 
-        Clear();
-
-        foreach (T item in other)
-            Add(item);
-
-        _suppressChangedEvent = false;
+            foreach (T item in other)
+                Add(item);
+        }
+        finally
+        {
+            _suppressChangedEvent = false;
+        }
 
         OnCollectionChanged(
             new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset)
@@ -37,12 +53,16 @@ public class FastObservableCollection<T> : ObservableCollection<T>, IFastObserva
     public void AddRange(IEnumerable other)
     {
         _suppressChangedEvent = true;
-
-        foreach (var item in other)
-            if (item is T tItem)
-                Add(tItem);
-
-        _suppressChangedEvent = false;
+        try
+        {
+            foreach (var item in other)
+                if (item is T tItem)
+                    Add(tItem);
+        }
+        finally
+        {
+            _suppressChangedEvent = false;
+        }
 
         OnCollectionChanged(
             new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset)
@@ -53,12 +73,16 @@ public class FastObservableCollection<T> : ObservableCollection<T>, IFastObserva
     public void RemoveRange(IEnumerable other)
     {
         _suppressChangedEvent = true;
-
-        foreach (var item in other)
-            if (item is T tItem)
-                Remove(tItem);
-
-        _suppressChangedEvent = false;
+        try
+        {
+            foreach (var item in other)
+                if (item is T tItem)
+                    Remove(tItem);
+        }
+        finally
+        {
+            _suppressChangedEvent = false;
+        }
 
         OnCollectionChanged(
             new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset)

@@ -412,11 +412,17 @@ public sealed class McpHost
 
     private async Task<JsonNode?> HandleBatchAsync(JsonArray batch, CancellationToken cancellationToken)
     {
+        if (batch.Count == 0)
+            return RpcError(null, -32600, "Invalid request");
+
         var results = new JsonArray();
         foreach (var item in batch)
         {
             if (item is not JsonObject message)
+            {
+                results.Add(RpcError(null, -32600, "Invalid request"));
                 continue;
+            }
             if (await HandleMessageAsync(message, cancellationToken) is { } result)
                 results.Add(result);
         }
@@ -430,7 +436,7 @@ public sealed class McpHost
         var isRequest = id != null;
         var method = message["method"]?.GetValue<string>();
         if (method == null)
-            return null; // A response or malformed message; nothing to answer.
+            return isRequest ? RpcError(id, -32600, "Invalid request") : null;
 
         try
         {

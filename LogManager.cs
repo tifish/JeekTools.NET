@@ -15,22 +15,29 @@ namespace JeekTools;
 public static class LogManager
 {
     private static ILoggerFactory? _factory;
+    private static readonly object FactoryLock = new();
     private static readonly object AliasUpdateLock = new();
 
     public static ILogger CreateLogger<T>()
     {
-        if (_factory == null)
-            EnableLogging();
+        lock (FactoryLock)
+        {
+            if (_factory == null)
+                EnableLoggingCore();
 
-        return _factory!.CreateLogger<T>();
+            return _factory!.CreateLogger<T>();
+        }
     }
 
     public static ILogger CreateLogger(string categoryName)
     {
-        if (_factory == null)
-            EnableLogging();
+        lock (FactoryLock)
+        {
+            if (_factory == null)
+                EnableLoggingCore();
 
-        return _factory!.CreateLogger(categoryName);
+            return _factory!.CreateLogger(categoryName);
+        }
     }
 
     public static LogLevel MinimumLevel { get; set; } = LogLevel.Information;
@@ -53,6 +60,14 @@ public static class LogManager
     public static int RollingSizeKB { get; set; } = 1000 * 1024;
 
     public static void EnableLogging()
+    {
+        lock (FactoryLock)
+        {
+            EnableLoggingCore();
+        }
+    }
+
+    private static void EnableLoggingCore()
     {
         _factory?.Dispose();
 
@@ -156,17 +171,23 @@ public static class LogManager
     /// </summary>
     public static void Shutdown()
     {
-        _factory?.Dispose();
-        _factory = null;
+        lock (FactoryLock)
+        {
+            _factory?.Dispose();
+            _factory = null;
+        }
     }
 
     public static void DisableLogging()
     {
-        _factory?.Dispose();
-        _factory = LoggerFactory.Create(logging =>
+        lock (FactoryLock)
         {
-            logging.ClearProviders();
-        });
+            _factory?.Dispose();
+            _factory = LoggerFactory.Create(logging =>
+            {
+                logging.ClearProviders();
+            });
+        }
     }
 
     /// <summary>

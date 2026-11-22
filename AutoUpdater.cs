@@ -56,8 +56,8 @@ public sealed class AutoUpdaterOptions
     public Func<int>? GetLocalVersion { get; init; }
 
     /// <summary>Local versions below this are treated as dev builds and never updated.
-    /// CI commit counts are always well above it.</summary>
-    public int MinimumValidLocalVersion { get; init; } = 10;
+    /// Dev builds stay at major version 0; CI commit counts start at 1.</summary>
+    public int MinimumValidLocalVersion { get; init; } = 1;
 }
 
 /// <summary>
@@ -611,7 +611,7 @@ public sealed class AutoUpdater
             return mirrors;
         }
 
-        var preferred = GetMirrorIndex(fastest);
+        var preferred = GetMirrorIndex(mirrors, fastest);
         Log.ZLogInformation($"GetFastestMirror selected index {preferred}: {fastest}");
         return OrderMirrors(mirrors, preferred);
     }
@@ -629,22 +629,17 @@ public sealed class AutoUpdater
             .ToArray();
     }
 
-    private static int GetMirrorIndex(string? mirrorUrl)
+    private static int GetMirrorIndex(string[] mirrors, string? mirrorUrl)
     {
         if (string.IsNullOrWhiteSpace(mirrorUrl))
             return -1;
-        if (mirrorUrl.Contains("ghfast.top", StringComparison.OrdinalIgnoreCase))
-            return 1;
-        if (mirrorUrl.Contains("gh-proxy.com", StringComparison.OrdinalIgnoreCase))
-            return 2;
-        if (mirrorUrl.Contains("github.com", StringComparison.OrdinalIgnoreCase))
-            return 0;
-        return -1;
+        return Array.FindIndex(mirrors, url => string.Equals(url, mirrorUrl, StringComparison.OrdinalIgnoreCase));
     }
 
     private void RememberPreferredMirror(string successfulMirrorUrl)
     {
-        var index = GetMirrorIndex(successfulMirrorUrl);
+        var mirrors = GitHubMirrors.GetMirrors(_options.ReleaseZipUrl);
+        var index = GetMirrorIndex(mirrors, successfulMirrorUrl);
         if (index >= 0)
             _preferredMirrorIndex = index;
     }
