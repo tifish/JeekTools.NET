@@ -16,8 +16,14 @@ public sealed class McpHostOptions
     /// <summary>MCP serverInfo.title.</summary>
     public required string ServerTitle { get; init; }
 
-    /// <summary>Object-path engine backing the standard tools.</summary>
-    public required ObjectGraph Graph { get; init; }
+    /// <summary>Object-path engine backing the standard tools. Required when
+    /// <see cref="RegisterStandardTools"/> is true.</summary>
+    public ObjectGraph? Graph { get; init; }
+
+    /// <summary>Registers the built-in debug tools (<c>describe</c>, <c>get_value</c>,
+    /// <c>set_value</c>, <c>invoke</c>, <c>list_members</c>, <c>read_logs</c>).
+    /// Set to false for product surfaces that must expose only explicitly added tools.</summary>
+    public bool RegisterStandardTools { get; init; } = true;
 
     /// <summary>serverInfo.version, e.g. the build number.</summary>
     public Func<string> GetVersion { get; init; } = () => "0";
@@ -107,12 +113,18 @@ public sealed class McpHost
     public McpHost(McpHostOptions options)
     {
         _options = options;
-        AddTool("describe", DescribeAsync);
-        AddTool("get_value", GetValueAsync);
-        AddTool("set_value", SetValueAsync);
-        AddTool("invoke", InvokeAsync);
-        AddTool("list_members", ListMembersAsync);
-        AddTool("read_logs", args => Task.FromResult(ReadLogs(args)));
+        if (_options.RegisterStandardTools)
+        {
+            if (_options.Graph is null)
+                throw new ArgumentException("Graph is required when RegisterStandardTools is true.", nameof(options));
+
+            AddTool("describe", DescribeAsync);
+            AddTool("get_value", GetValueAsync);
+            AddTool("set_value", SetValueAsync);
+            AddTool("invoke", InvokeAsync);
+            AddTool("list_members", ListMembersAsync);
+            AddTool("read_logs", args => Task.FromResult(ReadLogs(args)));
+        }
     }
 
     /// <summary>Registers (or replaces) a tool handler.</summary>
@@ -520,8 +532,9 @@ public sealed class McpHost
     {
         var path = RequiredString(args, "path");
         var depth = Math.Clamp(args["depth"]?.GetValue<int>() ?? 1, 0, 5);
+        var graph = _options.Graph ?? throw new InvalidOperationException("ObjectGraph is not configured.");
 
-        var node = await OnUiAsync(() => ObjectGraph.FormatValue(_options.Graph.Resolve(path), depth));
+        var node = await OnUiAsync(() => ObjectGraph.FormatValue(graph.Resolve(path), depth));
         return ToolText(node?.ToJsonString(PrettyOptions) ?? "null");
     }
 
@@ -529,10 +542,11 @@ public sealed class McpHost
     {
         var path = RequiredString(args, "path");
         var valueNode = args["value"];
+        var graph = _options.Graph ?? throw new InvalidOperationException("ObjectGraph is not configured.");
 
         await OnUiAsync<object?>(() =>
         {
-            _options.Graph.SetValue(path, valueNode);
+            graph.SetValue(path, valueNode);
             return null;
         });
 
@@ -544,8 +558,9 @@ public sealed class McpHost
         var path = RequiredString(args, "path");
         var callArgs = args["args"] as JsonArray ?? [];
         var depth = Math.Clamp(args["depth"]?.GetValue<int>() ?? 1, 0, 5);
+        var graph = _options.Graph ?? throw new InvalidOperationException("ObjectGraph is not configured.");
 
-        var result = await OnUiAsync(() => _options.Graph.InvokeMember(path, callArgs));
+        var result = await OnUiAsync(() => graph.InvokeMember(path, callArgs));
 
         if (result is Task task)
         {
@@ -563,7 +578,8 @@ public sealed class McpHost
     private async Task<JsonObject> ListMembersAsync(JsonObject args)
     {
         var path = RequiredString(args, "path");
-        return ToolText(await OnUiAsync(() => _options.Graph.ListMembers(path)));
+        var graph = _options.Graph ?? throw new InvalidOperationException("ObjectGraph is not configured.");
+        return ToolText(await OnUiAsync(() => graph.ListMembers(path)));
     }
 
     private static JsonObject ReadLogs(JsonObject args)

@@ -106,24 +106,48 @@ internal sealed class McpPipeServer(
     private async Task ServeAsync(NamedPipeServerStream pipe, CancellationToken token)
     {
         using var session = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var sessionToken = session.Token;
         var requests = new ConcurrentDictionary<string, CancellationTokenSource>(StringComparer.Ordinal);
         var tasks = new ConcurrentDictionary<int, Task>();
-        using var writeGate = new SemaphoreSlim(1, 1);
+        var writeGate = new SemaphoreSlim(1, 1);
+        var sessionEnded = 0;
         var taskId = 0;
         StreamWriter? writer = null;
 
         async Task WriteAsync(JsonNode response)
         {
-            await writeGate.WaitAsync(session.Token).ConfigureAwait(false);
+            if (Volatile.Read(ref sessionEnded) != 0 || sessionToken.IsCancellationRequested)
+                return;
+
+            var entered = false;
             try
             {
-                await writer!.WriteLineAsync(
+                await writeGate.WaitAsync(sessionToken).ConfigureAwait(false);
+                entered = true;
+                var currentWriter = writer;
+                if (currentWriter is null || Volatile.Read(ref sessionEnded) != 0 || sessionToken.IsCancellationRequested)
+                    return;
+
+                await currentWriter.WriteLineAsync(
                     response.ToJsonString().AsMemory(),
-                    session.Token).ConfigureAwait(false);
+                    sessionToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (sessionToken.IsCancellationRequested)
+            {
+                // Session ended while waiting or writing.
+            }
+            catch (Exception ex) when (Volatile.Read(ref sessionEnded) != 0
+                                       || ex is ObjectDisposedException or IOException)
+            {
+                // Pipe closed or torn down concurrently.
             }
             finally
             {
-                writeGate.Release();
+                if (entered)
+                {
+                    try { writeGate.Release(); }
+                    catch (ObjectDisposedException) { /* torn down */ }
+                }
             }
         }
 
@@ -132,7 +156,10 @@ internal sealed class McpPipeServer(
             CancellationTokenSource? request = null;
             try
             {
-                request = CancellationTokenSource.CreateLinkedTokenSource(session.Token);
+                if (Volatile.Read(ref sessionEnded) != 0 || sessionToken.IsCancellationRequested)
+                    return;
+
+                request = CancellationTokenSource.CreateLinkedTokenSource(sessionToken);
                 if (requestKey is not null && !requests.TryAdd(requestKey, request))
                     throw new InvalidOperationException($"A request with id {requestKey} is already running.");
 
@@ -140,12 +167,15 @@ internal sealed class McpPipeServer(
                 if (response is not null)
                     await WriteAsync(response).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (session.IsCancellationRequested)
+            catch (OperationCanceledException) when (sessionToken.IsCancellationRequested)
             {
                 // Session ended; there is nowhere left to send a response.
             }
             catch (Exception ex)
             {
+                if (Volatile.Read(ref sessionEnded) != 0 || sessionToken.IsCancellationRequested)
+                    return;
+
                 var response = new JsonObject
                 {
                     ["jsonrpc"] = "2.0",
@@ -167,14 +197,16 @@ internal sealed class McpPipeServer(
             }
         }
 
+        StreamReader? reader = null;
+        StreamWriter? sessionWriter = null;
         try
         {
-            using var reader = new StreamReader(pipe, Utf8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-            await using var sessionWriter = new StreamWriter(pipe, Utf8, leaveOpen: true) { AutoFlush = true };
+            reader = new StreamReader(pipe, Utf8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+            sessionWriter = new StreamWriter(pipe, Utf8, leaveOpen: true) { AutoFlush = true };
             writer = sessionWriter;
 
-            while (!session.IsCancellationRequested
-                   && await reader.ReadLineAsync(session.Token).ConfigureAwait(false) is { } line)
+            while (!sessionToken.IsCancellationRequested
+                   && await reader.ReadLineAsync(sessionToken).ConfigureAwait(false) is { } line)
             {
                 if (line.Length == 0)
                     continue;
@@ -203,7 +235,7 @@ internal sealed class McpPipeServer(
                 if (TryGetCancelledRequest(message, out var cancelled))
                 {
                     if (requests.TryGetValue(cancelled, out var request))
-                        request.Cancel();
+                        try { request.Cancel(); } catch (ObjectDisposedException) { /* completed concurrently */ }
                     continue;
                 }
 
@@ -218,6 +250,7 @@ internal sealed class McpPipeServer(
                     TaskScheduler.Default);
             }
 
+            Interlocked.Exchange(ref sessionEnded, 1);
             session.Cancel();
         }
         catch (IOException)
@@ -234,18 +267,46 @@ internal sealed class McpPipeServer(
         }
         finally
         {
+            Interlocked.Exchange(ref sessionEnded, 1);
             try { session.Cancel(); } catch (ObjectDisposedException) { /* already ending */ }
             foreach (var request in requests.Values)
                 try { request.Cancel(); } catch (ObjectDisposedException) { /* completed concurrently */ }
 
+            var allTasksCompleted = false;
             try
             {
                 await Task.WhenAll(tasks.Values).WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+                allTasksCompleted = true;
             }
             catch
             {
                 // A handler may not observe cancellation; the closed pipe still releases the slot.
             }
+
+            // Serialize writer teardown with any in-flight WriteAsync before disposing the writer/pipe.
+            var gateAcquired = false;
+            try
+            {
+                gateAcquired = await writeGate.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+                writer = null;
+            }
+            catch
+            {
+                writer = null;
+            }
+            finally
+            {
+                if (gateAcquired)
+                    writeGate.Release();
+            }
+
+            if (sessionWriter is not null)
+            {
+                try { await sessionWriter.DisposeAsync().ConfigureAwait(false); }
+                catch { /* pipe may already be broken */ }
+            }
+
+            reader?.Dispose();
 
             try
             {
@@ -258,6 +319,11 @@ internal sealed class McpPipeServer(
             }
 
             await pipe.DisposeAsync().ConfigureAwait(false);
+
+            // Only dispose writeGate when no stray task can still touch it; SemaphoreSlim without
+            // AvailableWaitHandle owns no kernel handle, so leaving it to GC is leak-free.
+            if (allTasksCompleted)
+                writeGate.Dispose();
         }
     }
 
