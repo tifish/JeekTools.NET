@@ -5,7 +5,7 @@ namespace JeekTools;
 public static class Nssm
 {
     public static string NssmPath { get; set; } =
-        Path.Join(AppContext.BaseDirectory, "Nssm", "nssm.exe");
+        Path.Join(AppPaths.ProgramDir, "Nssm", "nssm.exe");
 
     private static Process? CallNssm(string command)
     {

@@ -86,10 +86,7 @@ public static class LogManager
                     appName = Path.GetFileNameWithoutExtension(Environment.ProcessPath);
                 if (string.IsNullOrEmpty(appName))
                     appName = "Unknown";
-                var logsDir = Path.Combine(
-                    AppDomain.CurrentDomain.SetupInformation.ApplicationBase ?? string.Empty,
-                    LogsDirectory
-                );
+                var logsDir = Path.Combine(AppPaths.ProgramDir, LogsDirectory);
                 Directory.CreateDirectory(logsDir);
                 var currentAliasPath = Path.Join(logsDir, $"{appName}.log");
 

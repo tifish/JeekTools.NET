@@ -27,7 +27,7 @@ public sealed class SettingsStorage(string appName)
 
     public string AppName { get; } = appName;
 
-    public string ProgramDir => AppContext.BaseDirectory;
+    public string ProgramDir => AppPaths.ProgramDir;
 
     public string LocalDir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
