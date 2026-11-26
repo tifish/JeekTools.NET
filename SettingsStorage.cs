@@ -13,6 +13,13 @@ public enum StorageLocation
     CustomDirectory,
 }
 
+public enum ConfigFileConflictChoice
+{
+    Cancel,
+    UseSource,
+    KeepDestination,
+}
+
 /// <summary>
 /// Path scheme for app settings and user data, split by roaming behavior:
 /// machine-local state always lives under %LOCALAPPDATA%\&lt;AppName&gt;\Config,
@@ -123,6 +130,34 @@ public sealed class SettingsStorage(string appName)
     /// files with the same relative paths are replaced by the current Config.
     /// </summary>
     public static void MoveConfigRoot(string sourceRoot, string destRoot)
+        => MoveConfigRoot(sourceRoot, destRoot, null);
+
+    /// <summary>Resolve every file collision before moving anything. A cancelled
+    /// choice leaves both trees intact. No directory mutex is held across a prompt.</summary>
+    public static async Task<bool> TryMoveConfigRootAsync(string sourceRoot, string destRoot,
+        Func<string, string, Task<ConfigFileConflictChoice>> choose)
+    {
+        var source = NormalizeDirectoryPath(sourceRoot);
+        var dest = NormalizeDirectoryPath(destRoot);
+        if (string.Equals(source, dest, StringComparison.OrdinalIgnoreCase))
+            return true;
+        ValidateSeparateRoots(source, dest);
+
+        var choices = new Dictionary<string, ConfigFileConflictChoice>(StringComparer.OrdinalIgnoreCase);
+        foreach (var target in FindConflicts(source, dest).Order(StringComparer.OrdinalIgnoreCase).ToArray())
+        {
+            var file = Path.Combine(source, Path.GetRelativePath(dest, target));
+            var choice = await choose(file, target);
+            if (choice is not (ConfigFileConflictChoice.UseSource or ConfigFileConflictChoice.KeepDestination))
+                return false;
+            choices.Add(target, choice);
+        }
+        MoveConfigRoot(source, dest, choices);
+        return true;
+    }
+
+    private static void MoveConfigRoot(string sourceRoot, string destRoot,
+        IReadOnlyDictionary<string, ConfigFileConflictChoice>? choices)
     {
         var source = NormalizeDirectoryPath(sourceRoot);
         var dest = NormalizeDirectoryPath(destRoot);
@@ -130,8 +165,7 @@ public sealed class SettingsStorage(string appName)
         if (string.Equals(source, dest, StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (IsSameOrInside(source, dest) || IsSameOrInside(dest, source))
-            throw new InvalidOperationException("Config cannot be moved into itself or a nested folder.");
+        ValidateSeparateRoots(source, dest);
 
         if (!Directory.Exists(source))
         {
@@ -146,8 +180,12 @@ public sealed class SettingsStorage(string appName)
         if (!Directory.Exists(dest) && TryRenameDirectory(source, dest))
             return;
 
-        MoveDirectoryContents(source, dest);
-        Directory.Delete(source, recursive: true);
+        foreach (var target in FindConflicts(source, dest))
+            if (choices is not null && !choices.ContainsKey(target))
+                throw new IOException($"A new file conflict appeared: {target}");
+
+        MoveDirectoryContents(source, dest, choices);
+        Directory.Delete(source);
     }
 
     private static string NormalizeDirectoryPath(string path) =>
@@ -161,16 +199,59 @@ public sealed class SettingsStorage(string appName)
         return candidate.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void MoveDirectoryContents(string sourceDir, string destDir)
+    private static void ValidateSeparateRoots(string source, string dest)
+    {
+        if (IsSameOrInside(source, dest) || IsSameOrInside(dest, source))
+            throw new InvalidOperationException("Config cannot be moved into itself or a nested folder.");
+    }
+
+    private static IEnumerable<string> FindConflicts(string source, string dest)
+    {
+        if (!Directory.Exists(source) || !Directory.Exists(dest))
+            yield break;
+
+        if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0 ||
+            (File.GetAttributes(dest) & FileAttributes.ReparsePoint) != 0)
+            throw new IOException($"Cannot merge linked folders: {source}, {dest}");
+
+        foreach (var entry in new DirectoryInfo(source).EnumerateFileSystemInfos())
+        {
+            var target = Path.Combine(dest, entry.Name);
+            if (entry is DirectoryInfo)
+            {
+                if (File.Exists(target))
+                    throw new IOException($"Expected a directory at {target}");
+                foreach (var collision in FindConflicts(entry.FullName, target))
+                    yield return collision;
+            }
+            else if (Directory.Exists(target))
+                throw new IOException($"Expected a file at {target}");
+            else if (File.Exists(target))
+                yield return target;
+        }
+    }
+
+    private static void MoveDirectoryContents(string sourceDir, string destDir,
+        IReadOnlyDictionary<string, ConfigFileConflictChoice>? choices)
     {
         Directory.CreateDirectory(destDir);
 
         foreach (var file in Directory.GetFiles(sourceDir))
         {
             var target = Path.Combine(destDir, Path.GetFileName(file));
-            if (File.Exists(target))
-                File.Delete(target);
-            File.Move(file, target);
+            if (!File.Exists(target))
+            {
+                File.Move(file, target);
+                continue;
+            }
+            var choice = ConfigFileConflictChoice.UseSource;
+            if (choices is not null && !choices.TryGetValue(target, out choice))
+                throw new IOException($"A new file conflict appeared: {target}");
+            if (choice == ConfigFileConflictChoice.UseSource)
+                SharedDataFile.CopyAtomic(file, target, overwrite: true);
+            // Ensure the retained file still exists while discarding the source.
+            using var retained = File.Open(target, FileMode.Open, FileAccess.Read, FileShare.Read);
+            File.Delete(file);
         }
 
         foreach (var dir in Directory.GetDirectories(sourceDir))
@@ -181,8 +262,8 @@ public sealed class SettingsStorage(string appName)
             if (!Directory.Exists(target) && TryRenameDirectory(dir, target))
                 continue;
 
-            MoveDirectoryContents(dir, target);
-            Directory.Delete(dir, recursive: true);
+            MoveDirectoryContents(dir, target, choices);
+            Directory.Delete(dir);
         }
     }
 
